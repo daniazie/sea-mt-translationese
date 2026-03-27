@@ -3,7 +3,7 @@ DATASET=$2
 IS_VL=$3
 
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
-CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file configs/accelerate_single_gpu_config.yaml src/train/sft.py \
+CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file configs/accelerate_single_gpu_config.yaml --main_process_port 0 src/train/sft.py \
 --model ${MODEL} ${IS_VL} \
 --dataset_name_or_path ${DATASET} \
 --bf16 \

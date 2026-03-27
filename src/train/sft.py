@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, BitsAndBytesConfig, EarlyStoppingCallback
+from transformers import AutoProcessor, BitsAndBytesConfig, EarlyStoppingCallback
 from trl import SFTConfig, SFTTrainer, apply_chat_template
 from trl.trainer.sft_trainer import DataCollatorForLanguageModeling
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModelForCausalLM
@@ -8,9 +8,10 @@ from tokenizers import AddedToken
 from utils import format_ALT, format_conversational, compute_metrics, preprocess_dataset, postprocess_text
 from evaluate import load
 
+from functools import partial
 from pathlib import Path
-import random
 import numpy as np
+import random
 import wandb
 import argparse
 import torch
@@ -71,8 +72,6 @@ def preprocess_logits_for_metrics(logits, labels):
         logits = logits[0]
     return logits.argmax(dim=-1)
 
-wandb.login()
-
 parser = init_parser()
 args = parser.parse_args()
 
@@ -125,23 +124,11 @@ else:
         dtype=torch.bfloat16 if not args.full_finetuning else None,
     )
 
-tokenizer = AutoTokenizer.from_pretrained(
+tokenizer = AutoProcessor.from_pretrained(
     args.model,
     add_eos_token=True,
     padding_side='left'
 )
-
-if 'ModelSpace' in args.model:
-    gemma_tokenizer = AutoTokenizer.from_pretrained(
-        'google/gemma-2-2b-it',
-    )
-
-    #tokenizer.add_special_tokens({"additional_special_tokens": [AddedToken("\n")]})
-
-    tokenizer.chat_template = gemma_tokenizer.chat_template
-    tokenizer.add_special_tokens({'additional_special_tokens': ['<start_of_turn>', '<end_of_turn>']})
-    base_model.resize_token_embeddings(len(tokenizer))
-    del gemma_tokenizer
 
 if Path(args.dataset_name_or_path).exists():
     data_files = {
@@ -153,9 +140,10 @@ if Path(args.dataset_name_or_path).exists():
 else:
     dataset = load_dataset(args.dataset_name_or_path)
     
-col_names = dataset['train'].column_names
-dataset = dataset.map(format_conversational, batched=True)
-# dataset = dataset.map(preprocess_dataset)
+formatting_func = partial(format_conversational, tokenizer=tokenizer, is_vl=args.is_vl)
+dataset = dataset.map(formatting_func, batched=True)
+apply_chat_template = partial(preprocess_dataset, tokenizer=tokenizer)
+dataset = dataset.map(apply_chat_template)
 train_set = dataset['train']
 valid_set = dataset['valid']
 
@@ -193,7 +181,8 @@ training_args = SFTConfig(
     max_grad_norm=1.0,
     optim='adamw_8bit',
     lr_scheduler_type=args.lr_scheduler,
-    load_best_model_at_end=True
+    load_best_model_at_end=True,
+    seed=42
 )
 
 if not args.full_finetuning:

@@ -10,7 +10,7 @@ import gc
 
 def system_prompt_supported(tokenizer):
     try: 
-        _ = tokenizer.apply_chat_template([{"role": "system", "content": ""}])
+        _ = tokenizer.apply_chat_template([{"role": "system", "content": "Lorem ipsum"}])
         return True
     except:
         return False
@@ -51,7 +51,7 @@ def format_func(example):
 
     return {'prompt': prompt, 'completion': completion}
 
-def format_conversational(examples, model_name, is_vl, tokenizer):
+def format_conversational(examples, tokenizer, is_vl):
     srcs = [example for example in examples['src']]
     refs = [example for example in examples['ref']]
     src_langs = [example for example in examples['src_lang']]
@@ -64,18 +64,23 @@ def format_conversational(examples, model_name, is_vl, tokenizer):
     for src, ref, src_lang, tgt_lang in zip(srcs, refs, src_langs, tgt_langs):
         if not system_prompt_supported(tokenizer):
             user_prompt = sys_prompt + '\n\n' + user_prompt
+            prompt = [
+                {
+                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
+                }
+            ]
+            prompts.append(prompt)
 
-        prompt = [
-            {
-                "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
-            },
+        else:
+            prompt = [
+                {
+                    "role": "system", "content": [{"type": "text", "text": sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)}] if is_vl else sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)
+                },
+                {
+                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
+                }
+            ]
             
-        ]
-
-        if system_prompt_supported(tokenizer):
-            prompt.append({
-                "role": "system", "content": [{"type": "text", "text": sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)}] if is_vl else sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)
-            })
 
         completion = [
             {
@@ -86,9 +91,14 @@ def format_conversational(examples, model_name, is_vl, tokenizer):
         prompts.append(prompt)
         completions.append(completion)
 
-    return {'prompt': prompt, 'completion': completions}
+    return {'prompt': prompts, 'completion': completions}
 
 def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
+    if example.get("prompt") and example.get("completion"):
+        return {
+            "prompt": apply_chat_template(example['prompt'], tokenizer=tokenizer),
+            "completion": apply_chat_template(example=['completion'], tokenizer=tokenizer)
+        }
     return apply_chat_template(
         example,
         tokenizer=tokenizer
