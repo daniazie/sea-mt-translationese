@@ -24,6 +24,7 @@ CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file co
 --save_total_limit 2 \
 --report_to="wandb" \
 --loss_type='nll' \
+--completion_only_loss \
 --lora_r=64 \
 --lora_alpha=256 \
 --lora_dropout=0.0 \

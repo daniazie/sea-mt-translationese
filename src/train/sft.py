@@ -77,7 +77,7 @@ if __name__ == "__main__":
 
     dataset_name = args.dataset_name_or_path.split('/')[-1]
 
-    experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}{'_completion_only_loss' if args.completion_only_loss else ''}_{args.loss_type}_loss_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}"
+    experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}_{args.loss_type}_loss_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}"
     
     run = wandb.init(
             project=f"SEAMT_{args.model.split('/')[-1]}",
