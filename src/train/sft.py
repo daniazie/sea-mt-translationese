@@ -5,7 +5,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 from datasets import load_dataset, concatenate_datasets
 from tokenizers import AddedToken
 
-from utils import format_ALT, format_conversational, compute_metrics, preprocess_dataset, preprocess_logits_for_metrics
+from utils import format_conversational, compute_metrics, preprocess_dataset, preprocess_logits_for_metrics
 from evaluate import load
 
 from functools import partial
