@@ -1,0 +1,42 @@
+[project]
+name = "sea-mt"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "bert-score>=0.3.13",
+    "bs4>=0.0.2",
+    "evaluate>=0.4.6",
+    "malaya>=5.1.1",
+    "nltk>=3.9.4",
+    "openrlhf>=0.9.3",
+    "rouge-score>=0.1.2",
+    "sacrebleu>=2.6.0",
+    "setuptools>=80.10.2",
+    "torch>=2.9.1",
+    "torchaudio>=2.9.1",
+    "torchvision>=0.24.1",
+    "trl>=0.29.1",
+    "unbabel-comet>=2.2.7",
+    "vllm==0.17.0",
+    "xielu",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu128"},
+]
+torchvision = [
+  { index = "pytorch-cu128"},
+]
+xielu = { git = "https://github.com/rubber-duck-debug/xielu.git" }
+
+[tool.uv]
+override-dependencies = ["numpy==2.2.6", "protobuf==6.30.0"]
+exclude-dependencies = ['pynvml']

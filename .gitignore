@@ -8,10 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
-.python-version
-pyproject.toml
-README.md
-uv.lock
+
 
 # ariel
 _old/*
