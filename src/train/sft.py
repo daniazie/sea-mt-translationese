@@ -153,7 +153,7 @@ if Path(args.dataset_name_or_path).exists():
 else:
     dataset = load_dataset(args.dataset_name_or_path)
     
-col_names = dataset['train'].col_names
+col_names = dataset['train'].column_names
 dataset = dataset.map(format_conversational, batched=True)
 # dataset = dataset.map(preprocess_dataset)
 train_set = dataset['train']
