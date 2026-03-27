@@ -10,17 +10,19 @@ dependencies = [
     "evaluate>=0.4.6",
     "malaya>=5.1.1",
     "nltk>=3.9.4",
-    "openrlhf>=0.9.3",
+    "openrlhf[vllm]>=0.9.8",
+    "peft>=0.18.1",
     "rouge-score>=0.1.2",
     "sacrebleu>=2.6.0",
-    "setuptools>=80.10.2",
-    "torch>=2.9.1",
-    "torchaudio>=2.9.1",
-    "torchvision>=0.24.1",
+    "torch==2.10.0",
+    "torchao>=0.16.0",
+    "torchaudio>=2.10.0",
+    "torchvision>=0.25.0",
     "trl>=0.29.1",
     "unbabel-comet>=2.2.7",
-    "vllm==0.17.0",
-    "xielu",
+    "vllm>=0.18.0",
+    "wandb>=0.25.1",
+    "xielu>=0.1",
 ]
 
 [[tool.uv.index]]
@@ -35,8 +37,11 @@ torch = [
 torchvision = [
   { index = "pytorch-cu128"},
 ]
+torchaudio = [
+  { index = "pytorch-cu128"},
+]
 xielu = { git = "https://github.com/rubber-duck-debug/xielu.git" }
 
 [tool.uv]
-override-dependencies = ["numpy==2.2.6", "protobuf==6.30.0"]
+override-dependencies = ["numpy==2.2.6", "protobuf==6.33.5", "transformers>=5.0.0", "huggingface-hub>=1.0.0"]
 exclude-dependencies = ['pynvml']

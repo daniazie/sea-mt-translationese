@@ -5,21 +5,33 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 from datasets import load_dataset, concatenate_datasets
 from tokenizers import AddedToken
 
-from utils import format_ALT, format_conversational, compute_metrics, preprocess_dataset, postprocess_text
+from utils import format_ALT, format_conversational, compute_metrics, preprocess_dataset, preprocess_logits_for_metrics
 from evaluate import load
 
 from functools import partial
 from pathlib import Path
+import logging
 import numpy as np
 import random
 import wandb
 import argparse
 import torch
+import sys
 import gc
 import os
 
 torch.cuda.empty_cache()
 random.seed(42)
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
 
 def init_parser():
     parser = argparse.ArgumentParser()
@@ -66,168 +78,166 @@ def init_parser():
     parser.set_defaults(bidirectional=False)
     return parser
 
+if __name__ == "__main__":
+    parser = init_parser()
+    args = parser.parse_args()
 
-def preprocess_logits_for_metrics(logits, labels):
-    if isinstance(logits, tuple):
-        logits = logits[0]
-    return logits.argmax(dim=-1)
+    dataset_name = args.dataset_name_or_path.split('/')[-1]
 
-parser = init_parser()
-args = parser.parse_args()
-
-dataset_name = args.dataset_name_or_path.split('/')[-1]
-
-if not args.full_finetuning:
-    experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}{'_completion_only_loss' if args.completion_only_loss else ''}_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}"
-else: experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}{'_completion_only_loss' if args.completion_only_loss else ''}"
-wandb.init(
-        project=f"SEAMT_{args.model.split('/')[-1]}",
-        name=experiment_name,
-        config = {
-            'epochs': args.num_train_epochs,
-            'lr': args.learning_rate,
-            'weight_decay': args.weight_decay,
-            'completion_only_loss': args.completion_only_loss,
-            'lora': {
-                'r': args.lora_r,
-                'alpha': args.lora_alpha,
-                'dropout': args.lora_dropout,
-                'bias': args.lora_bias
-            }
-        },
-        reinit="create_new"
-    )
-
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
-    bnb_4bit_use_double_quant=True
-)
-
-if args.is_vl:
-    from transformers import AutoModelForImageTextToText
-    base_model = AutoModelForImageTextToText.from_pretrained(
-        args.model,
-        quantization_config=quantization_config,
-        #attn_implementation='sdpa',
-        device_map='auto',
-        dtype=torch.bfloat16,
-    )
-else:
-    from transformers import AutoModelForCausalLM
-    base_model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        quantization_config=quantization_config if not args.full_finetuning else None,
-        #attn_implementation='eager' if 'gemma' in args.model.lower() else 'sdpa',
-        device_map='auto',
-        dtype=torch.bfloat16 if not args.full_finetuning else None,
-    )
-
-tokenizer = AutoProcessor.from_pretrained(
-    args.model,
-    add_eos_token=True,
-    padding_side='left'
-)
-
-if Path(args.dataset_name_or_path).exists():
-    data_files = {
-        split: f"{args.dataset_name_or_path}/{split}.json"
-        for split in ['train', 'valid', 'test']
-    }
-    dataset = load_dataset("json", data_files=data_files)
-
-else:
-    dataset = load_dataset(args.dataset_name_or_path)
+    if not args.full_finetuning:
+        experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}{'_completion_only_loss' if args.completion_only_loss else ''}_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}"
+    else: experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}{'_completion_only_loss' if args.completion_only_loss else ''}"
     
-formatting_func = partial(format_conversational, tokenizer=tokenizer, is_vl=args.is_vl)
-dataset = dataset.map(formatting_func, batched=True)
-apply_chat_template = partial(preprocess_dataset, tokenizer=tokenizer)
-dataset = dataset.map(apply_chat_template)
-train_set = dataset['train']
-valid_set = dataset['valid']
+    wandb.init(
+            project=f"SEAMT_{args.model.split('/')[-1]}",
+            name=experiment_name,
+            config = {
+                'epochs': args.num_train_epochs,
+                'lr': args.learning_rate,
+                'weight_decay': args.weight_decay,
+                'completion_only_loss': args.completion_only_loss,
+                'lora': {
+                    'r': args.lora_r,
+                    'alpha': args.lora_alpha,
+                    'dropout': args.lora_dropout,
+                    'bias': args.lora_bias
+                }
+            },
+            reinit="create_new"
+        )
 
-base_model.gradient_checkpointing_enable()
-
-os.makedirs('/data/dania/sea-mt/models', exist_ok=True)
-output_dir = f'/data/dania/sea-mt/models/{args.model}_{experiment_name}'
-
-early_stopping_callback = EarlyStoppingCallback(
-        early_stopping_patience=10,
-        early_stopping_threshold=0.001
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True
     )
 
-data_collator = DataCollatorForLanguageModeling(pad_token_id=tokenizer.pad_token_id, return_tensors='pt')
+    if args.is_vl:
+        from transformers import AutoModelForImageTextToText
+        base_model = AutoModelForImageTextToText.from_pretrained(
+            args.model,
+            quantization_config=quantization_config,
+            #attn_implementation='sdpa',
+            device_map='auto',
+            dtype=torch.bfloat16,
+        )
+    else:
+        from transformers import AutoModelForCausalLM
+        base_model = AutoModelForCausalLM.from_pretrained(
+            args.model,
+            quantization_config=quantization_config if not args.full_finetuning else None,
+            #attn_implementation='eager' if 'gemma' in args.model.lower() else 'sdpa',
+            device_map='auto',
+            dtype=torch.bfloat16 if not args.full_finetuning else None,
+        )
 
-training_args = SFTConfig(
-    output_dir=output_dir,
-    per_device_train_batch_size=args.per_device_train_batch_size,
-    per_device_eval_batch_size=args.per_device_eval_batch_size,
-    gradient_accumulation_steps=args.gradient_accumulation_steps,
-    eval_accumulation_steps=args.eval_accumulation_steps,
-    num_train_epochs=args.num_train_epochs,
-    eval_strategy=args.evaluation_strategy,
-    max_length=args.max_seq_length,
-    weight_decay=args.weight_decay,
-    learning_rate=args.learning_rate,
-    logging_steps=args.logging_steps,
-    completion_only_loss=args.completion_only_loss,
-    eval_steps=args.eval_steps,
-    save_steps=args.save_steps,
-    packing=args.packing,
-    warmup_ratio=0.1,
-    bf16=args.bf16,
-    fp16=args.fp16,
-    max_grad_norm=1.0,
-    optim='adamw_8bit',
-    lr_scheduler_type=args.lr_scheduler,
-    load_best_model_at_end=True,
-    seed=42
-)
-
-if not args.full_finetuning:
-    base_model = prepare_model_for_kbit_training(base_model)
-
-    peft_config = LoraConfig(
-    r=args.lora_r, 
-    lora_alpha=args.lora_alpha, 
-    lora_dropout=args.lora_dropout,
-    target_modules=args.lora_target_modules,
-    bias=args.lora_bias,
-    task_type="CAUSAL_LM",
-    use_rslora=True,
+    tokenizer = AutoProcessor.from_pretrained(
+        args.model,
+        add_eos_token=True,
+        padding_side='left'
     )
 
-trainer = SFTTrainer(
-    model=base_model,
-    processing_class=tokenizer,
-    train_dataset=train_set,
-    eval_dataset=valid_set,
-    args=training_args,
-    data_collator=data_collator,
-    callbacks=[early_stopping_callback],
-    peft_config=peft_config if not args.full_finetuning else None,
-    compute_metrics=compute_metrics,
-    preprocess_logits_for_metrics=preprocess_logits_for_metrics,
-)
+    if Path(args.dataset_name_or_path).exists():
+        data_files = {
+            split: f"{args.dataset_name_or_path}/{split}.json"
+            for split in ['train', 'valid', 'test']
+        }
+        dataset = load_dataset("json", data_files=data_files)
 
-trainer.train()
+    else:
+        dataset = load_dataset(args.dataset_name_or_path)
+        
+    formatting_func = partial(format_conversational, tokenizer=tokenizer, is_vl=args.is_vl)
+    dataset = dataset.map(formatting_func, batched=True)
+    logging.info(f"Dataset columns: {dataset.column_names}")
+    
+    apply_chat_template = partial(preprocess_dataset, tokenizer=tokenizer)
+    dataset = dataset.map(apply_chat_template)
+    train_set = dataset['train']
+    valid_set = dataset['valid']
 
-trainer.save_model(output_dir)
+    base_model.gradient_checkpointing_enable()
 
-trainer.model.save_pretrained(f'{output_dir}/final_checkpoint')
-tokenizer.save_pretrained(f'{output_dir}/final_checkpoint')
+    os.makedirs('/data/dania/sea-mt/models', exist_ok=True)
+    output_dir = f'/data/dania/sea-mt/models/{args.model}_{experiment_name}'
 
-wandb.finish()
+    early_stopping_callback = EarlyStoppingCallback(
+            early_stopping_patience=10,
+            early_stopping_threshold=0.001
+        )
 
-if not args.full_finetuning:
-    model = PeftModelForCausalLM.from_pretrained(base_model, f'{output_dir}', device_map='auto', torch_dtype=torch.bfloat16)
-    del base_model
-    model = model.merge_and_unload()
+    data_collator = DataCollatorForLanguageModeling(pad_token_id=tokenizer.pad_token_id, return_tensors='pt')
 
-model.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
-tokenizer.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
+    training_args = SFTConfig(
+        output_dir=output_dir,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        per_device_eval_batch_size=args.per_device_eval_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        eval_accumulation_steps=args.eval_accumulation_steps,
+        num_train_epochs=args.num_train_epochs,
+        eval_strategy=args.evaluation_strategy,
+        max_length=args.max_seq_length,
+        weight_decay=args.weight_decay,
+        learning_rate=args.learning_rate,
+        logging_steps=args.logging_steps,
+        completion_only_loss=args.completion_only_loss,
+        eval_steps=args.eval_steps,
+        save_steps=args.save_steps,
+        packing=args.packing,
+        warmup_ratio=0.1,
+        bf16=args.bf16,
+        fp16=args.fp16,
+        max_grad_norm=1.0,
+        optim='adamw_8bit',
+        lr_scheduler_type=args.lr_scheduler,
+        load_best_model_at_end=True,
+        seed=42
+    )
 
-model.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA")
-tokenizer.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA")
-torch.cuda.empty_cache()
+    if not args.full_finetuning:
+        base_model = prepare_model_for_kbit_training(base_model)
+
+        peft_config = LoraConfig(
+        r=args.lora_r, 
+        lora_alpha=args.lora_alpha, 
+        lora_dropout=args.lora_dropout,
+        target_modules=args.lora_target_modules,
+        bias=args.lora_bias,
+        task_type="CAUSAL_LM",
+        use_rslora=True,
+        )
+
+    trainer = SFTTrainer(
+        model=base_model,
+        processing_class=tokenizer,
+        train_dataset=train_set,
+        eval_dataset=valid_set,
+        args=training_args,
+        data_collator=data_collator,
+        callbacks=[early_stopping_callback],
+        peft_config=peft_config if not args.full_finetuning else None,
+        compute_metrics=compute_metrics,
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics,
+    )
+
+    trainer.train()
+
+    trainer.save_model(output_dir)
+
+    trainer.model.save_pretrained(f'{output_dir}/final_checkpoint')
+    tokenizer.save_pretrained(f'{output_dir}/final_checkpoint')
+
+    wandb.finish()
+
+    if not args.full_finetuning:
+        model = PeftModelForCausalLM.from_pretrained(base_model, f'{output_dir}', device_map='auto', torch_dtype=torch.bfloat16)
+        del base_model
+        model = model.merge_and_unload()
+
+    model.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
+    tokenizer.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
+
+    model.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA")
+    tokenizer.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA")
+    torch.cuda.empty_cache()

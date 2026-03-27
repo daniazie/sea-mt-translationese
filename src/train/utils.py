@@ -93,16 +93,17 @@ def format_conversational(examples, tokenizer, is_vl):
 
     return {'prompt': prompts, 'completion': completions}
 
-def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
-    if example.get("prompt") and example.get("completion"):
+def preprocess_dataset(examples, tokenizer: PreTrainedTokenizerBase):
+    if examples.get("prompt") and examples.get("completion"):
         return {
-            "prompt": apply_chat_template(example['prompt'], tokenizer=tokenizer),
-            "completion": apply_chat_template(example=['completion'], tokenizer=tokenizer)
+            "prompt": [apply_chat_template({"prompt": prompt}, tokenizer=tokenizer) for prompt in examples['prompt']],
+            "completion": [apply_chat_template({"completion": completion}, tokenizer=tokenizer) for completion in examples['completion']]
         }
-    return apply_chat_template(
+    return {"text": [apply_chat_template(
         example,
         tokenizer=tokenizer
-    )
+    ) for example in examples]
+    }
 
 def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]
@@ -129,3 +130,8 @@ def compute_metrics(pred_eval, tokenizer):
     result["gen_len"] = np.mean(prediction_lens)
     result = {k: round(v, 4) for k, v in result.items()}
     return result
+
+def preprocess_logits_for_metrics(logits, labels):
+    if isinstance(logits, tuple):
+        logits = logits[0]
+    return logits.argmax(dim=-1)
