@@ -96,8 +96,8 @@ def format_conversational(examples, tokenizer, is_vl):
 def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
     if example.get("prompt") and example.get("completion"):
         return {
-            "prompt": apply_chat_template({"prompt": example['prompt']}, tokenizer=tokenizer),
-            "completion": apply_chat_template({"completion": example['completion']}, tokenizer=tokenizer)
+            "prompt": tokenizer.apply_chat_template(example['prompt'], tokenize=False, add_generation_prompt=True),
+            "completion": tokenizer.apply_chat_template(example['completion'], tokenize=False)
         }
     return {
         "text": apply_chat_template(

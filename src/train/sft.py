@@ -152,8 +152,8 @@ if __name__ == "__main__":
     dataset = dataset.map(formatting_func, batched=True)
     logging.info(f"Dataset columns: {dataset.column_names}")
     
-    apply_chat_template = partial(preprocess_dataset, tokenizer=tokenizer)
-    dataset = dataset.map(apply_chat_template)
+    #apply_chat_template = partial(preprocess_dataset, tokenizer=tokenizer)
+    #dataset = dataset.map(apply_chat_template)
     train_set = dataset['train']
     valid_set = dataset['valid']
 
@@ -162,6 +162,7 @@ if __name__ == "__main__":
     os.makedirs('/data/dania/sea-mt/models', exist_ok=True)
     output_dir = f'/data/dania/sea-mt/models/{args.model}_{experiment_name}'
 
+    compute_metrics = partial(compute_metrics, tokenizer=tokenizer)
     early_stopping_callback = EarlyStoppingCallback(
             early_stopping_patience=10,
             early_stopping_threshold=0.001
