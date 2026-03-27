@@ -6,8 +6,9 @@ from datasets import load_dataset, concatenate_datasets
 from tokenizers import AddedToken
 
 from utils import format_ALT, format_conversational, compute_metrics, preprocess_dataset, postprocess_text
-
 from evaluate import load
+
+from pathlib import Path
 import random
 import numpy as np
 import wandb
@@ -21,16 +22,14 @@ random.seed(42)
 
 def init_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, help="Model to fine-tuned [qwen | qwen-instruct | llama | llama-instruct | gemma]", default='gemma')
+    parser.add_argument('--model', type=str, help="Model to fine-tuned",)
     parser.add_argument('--is_vl', action='store_true')
-    parser.add_argument('--dataset', type=str, help='Dataset to be used', default='ntrex-128-SEA')
-    parser.add_argument('--data_size', default="full")
+    parser.add_argument('--dataset_name_or_path', type=str, help='Dataset to be used')
     parser.add_argument('--prompt_type', type=str, help='Prompt language')
     parser.add_argument('--quant_type', type=str, help='Quantization method', default='bnb')
     parser.add_argument('--full_finetuning', action='store_true')
     parser.add_argument('--bidirectional', action='store_true')
     parser.add_argument('--packing', action='store_true')
-    parser.add_argument('--no-packing', dest='packing', action='store_false')
     parser.add_argument('--per_device_train_batch_size', type=int, default=5)
     parser.add_argument('--per_device_eval_batch_size', type=int, default=5)
     parser.add_argument('--gradient_accumulation_steps', type=int, default=16)
@@ -41,23 +40,22 @@ def init_parser():
     parser.add_argument('--lr_scheduler', type=str, default='inverse_sqrt')
     parser.add_argument('--max_seq_length', type=int, default=200)
     parser.add_argument('--evaluation_strategy', type=str, default=None)
+    parser.add_argument('--completion_only_loss', action='store_true', default=False)
     parser.add_argument('--logging_steps', type=int, default=100)
     parser.add_argument('--eval_steps', type=int, default=0)
     parser.add_argument('--save_steps', type=int, default=0)
     parser.add_argument('--save_total_limit', type=int, default=-1)
     parser.add_argument('--use_liger_kernel', action='store_true', default=False)
     parser.add_argument('--bf16', action='store_true')
-    parser.add_argument('--no-bf16', dest='bf16', action='store_false')
     parser.add_argument('--fp16', action='store_true')
-    parser.add_argument('--no-fp16', dest='fp16', action='store_false')
     parser.add_argument('--report_to', type=str, default='wandb')
-    parser.add_argument('--num_gpus', type=int, default=1)
     parser.add_argument('--local_rank', type=int, default=32)
 
     parser.add_argument('--lora_r', type=int, default=32)
     parser.add_argument('--lora_alpha', type=int, default=64)
     parser.add_argument('--lora_dropout', type=float, default=0.1)
     parser.add_argument('--lora_bias', type=str, default='none')
+    parser.add_argument('--lora_target_modules', nargs='*')
 
     parser.set_defaults(is_vl=False)
     parser.set_defaults(packing=False)
@@ -73,23 +71,16 @@ def preprocess_logits_for_metrics(logits, labels):
         logits = logits[0]
     return logits.argmax(dim=-1)
 
-wandb.login(key=os.environ['WANDB_KEY'])
+wandb.login()
 
 parser = init_parser()
 args = parser.parse_args()
 
-dataset_name = args.dataset.split('/')[-1]
-
-
-
-try:
-    data_size = int(args.data_size)
-except:
-    data_size = args.data_size
+dataset_name = args.dataset_name_or_path.split('/')[-1]
 
 if not args.full_finetuning:
-    experiment_name = f"SFT_{dataset_name}_{data_size}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}"
-else: experiment_name = f"SFT_{dataset_name}_{data_size}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}"
+    experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}{'_completion_only_loss' if args.completion_only_loss else ''}_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}"
+else: experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}{'_completion_only_loss' if args.completion_only_loss else ''}"
 wandb.init(
         project=f"SEAMT_{args.model.split('/')[-1]}",
         name=experiment_name,
@@ -97,6 +88,7 @@ wandb.init(
             'epochs': args.num_train_epochs,
             'lr': args.learning_rate,
             'weight_decay': args.weight_decay,
+            'completion_only_loss': args.completion_only_loss,
             'lora': {
                 'r': args.lora_r,
                 'alpha': args.lora_alpha,
@@ -104,7 +96,7 @@ wandb.init(
                 'bias': args.lora_bias
             }
         },
-        reinit=True
+        reinit="create_new"
     )
 
 quantization_config = BitsAndBytesConfig(
@@ -119,7 +111,7 @@ if args.is_vl:
     base_model = AutoModelForImageTextToText.from_pretrained(
         args.model,
         quantization_config=quantization_config,
-        attn_implementation='sdpa',
+        #attn_implementation='sdpa',
         device_map='auto',
         dtype=torch.bfloat16,
     )
@@ -128,14 +120,13 @@ else:
     base_model = AutoModelForCausalLM.from_pretrained(
         args.model,
         quantization_config=quantization_config if not args.full_finetuning else None,
-        attn_implementation='eager' if 'gemma' in args.model.lower() else 'sdpa',
+        #attn_implementation='eager' if 'gemma' in args.model.lower() else 'sdpa',
         device_map='auto',
         dtype=torch.bfloat16 if not args.full_finetuning else None,
     )
 
 tokenizer = AutoTokenizer.from_pretrained(
     args.model,
-    #device_map='auto',
     add_eos_token=True,
     padding_side='left'
 )
@@ -152,38 +143,26 @@ if 'ModelSpace' in args.model:
     base_model.resize_token_embeddings(len(tokenizer))
     del gemma_tokenizer
 
-if 'parallel_asian_treebank' in args.dataset:
-    dataset = load_dataset(
-        args.dataset,
-        'parallel_asian_treebank_zlm_eng_seacrowd_t2t',
-        trust_remote_code=True
-        )
+if Path(args.dataset_name_or_path).exists():
+    data_files = {
+        split: f"{args.dataset_name_or_path}/{split}.json"
+        for split in ['train', 'valid', 'test']
+    }
+    dataset = load_dataset("json", data_files=data_files)
+
 else:
-    dataset = load_dataset(args.dataset)
-
-if 'parallel_asian_treebank' in dataset_name:
-    dataset = dataset.map(format_ALT, remove_columns=['id', 'text_1', 'text_2', 'text_1_name', 'text_2_name'], batched=True)
-    col_names = dataset['train'].column_names
+    dataset = load_dataset(args.dataset_name_or_path)
     
-dataset = dataset.map(format_conversational, remove_columns=col_names, batched=True)
-dataset = dataset.map(preprocess_dataset)
+col_names = dataset['train'].col_names
+dataset = dataset.map(format_conversational, batched=True)
+# dataset = dataset.map(preprocess_dataset)
 train_set = dataset['train']
-valid_set = dataset['validation' if 'parallel_asian_treebank' in dataset_name else 'valid']
-
-
-if isinstance(data_size, int):
-    train_idx = random.sample(range(len(train_set)), data_size)
-    valid_size = round(data_size / 0.7 * 0.3)
-    if valid_size < len(valid_set):
-        valid_idx = random.sample(range(len(valid_set)), valid_size)
-        valid_set = valid_set.select(valid_idx)
-    train_set = train_set.select(train_idx)
-    
+valid_set = dataset['valid']
 
 base_model.gradient_checkpointing_enable()
 
-os.makedirs('models', exist_ok=True)
-output_dir = f'models/{args.model}_{experiment_name}'
+os.makedirs('/data/dania/sea-mt/models', exist_ok=True)
+output_dir = f'/data/dania/sea-mt/models/{args.model}_{experiment_name}'
 
 early_stopping_callback = EarlyStoppingCallback(
         early_stopping_patience=10,
@@ -194,7 +173,6 @@ data_collator = DataCollatorForLanguageModeling(pad_token_id=tokenizer.pad_token
 
 training_args = SFTConfig(
     output_dir=output_dir,
-    dataset_text_field="text",
     per_device_train_batch_size=args.per_device_train_batch_size,
     per_device_eval_batch_size=args.per_device_eval_batch_size,
     gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -205,7 +183,7 @@ training_args = SFTConfig(
     weight_decay=args.weight_decay,
     learning_rate=args.learning_rate,
     logging_steps=args.logging_steps,
-    completion_only_loss=True,
+    completion_only_loss=args.completion_only_loss,
     eval_steps=args.eval_steps,
     save_steps=args.save_steps,
     packing=args.packing,
@@ -215,7 +193,7 @@ training_args = SFTConfig(
     max_grad_norm=1.0,
     optim='adamw_8bit',
     lr_scheduler_type=args.lr_scheduler,
-    load_best_model_at_end=True,
+    load_best_model_at_end=True
 )
 
 if not args.full_finetuning:
@@ -225,7 +203,7 @@ if not args.full_finetuning:
     r=args.lora_r, 
     lora_alpha=args.lora_alpha, 
     lora_dropout=args.lora_dropout,
-    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj'],
+    target_modules=args.lora_target_modules,
     bias=args.lora_bias,
     task_type="CAUSAL_LM",
     use_rslora=True,
@@ -244,7 +222,6 @@ trainer = SFTTrainer(
     preprocess_logits_for_metrics=preprocess_logits_for_metrics,
 )
 
-
 trainer.train()
 
 trainer.save_model(output_dir)
@@ -262,6 +239,6 @@ if not args.full_finetuning:
 model.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
 tokenizer.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
 
-model.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT_{dataset_name}_{data_size}")
-tokenizer.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT_{dataset_name}_{data_size}")
+model.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA")
+tokenizer.push_to_hub(repo_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA")
 torch.cuda.empty_cache()

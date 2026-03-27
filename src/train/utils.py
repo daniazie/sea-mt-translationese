@@ -8,6 +8,12 @@ from evaluate import load
 import numpy as np
 import gc
 
+def system_prompt_supported(tokenizer):
+    try: 
+        _ = tokenizer.apply_chat_template([{"role": "system", "content": ""}])
+        return True
+    except:
+        return False
 
 def format_ALT(examples):
     ms_tokenizer = SentenceTokenizer()
@@ -45,35 +51,42 @@ def format_func(example):
 
     return {'prompt': prompt, 'completion': completion}
 
-def format_conversational(examples, model_name, is_vl):
+def format_conversational(examples, model_name, is_vl, tokenizer):
     srcs = [example for example in examples['src']]
     refs = [example for example in examples['ref']]
     src_langs = [example for example in examples['src_lang']]
     tgt_langs = [example for example in examples['tgt_lang']] 
 
-    messages = []
+    prompts = []
+    completions = []
     sys_prompt = "Translate the given sentence from {src_lang} to {tgt_lang}."
     user_prompt = "{src_lang}: {src}\n\n{tgt_lang}: "
     for src, ref, src_lang, tgt_lang in zip(srcs, refs, src_langs, tgt_langs):
-        if 'gemma' in model_name.lower():
+        if not system_prompt_supported(tokenizer):
             user_prompt = sys_prompt + '\n\n' + user_prompt
 
-        message = [
+        prompt = [
             {
                 "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
             },
-            {
-                "role": "assistant" if not 'gemma' in model_name.lower() else 'model', "content": [{"type": "text", "text": ref}] if is_vl else ref
-            }
+            
         ]
 
-        if not 'gemma' in model_name.lower():
-            message.append({
+        if system_prompt_supported(tokenizer):
+            prompt.append({
                 "role": "system", "content": [{"type": "text", "text": sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)}] if is_vl else sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)
             })
-        messages.append(message)
 
-    return {'messages': messages}
+        completion = [
+            {
+                "role": "assistant" if "assistant" in tokenizer.chat_template else 'model', "content": [{"type": "text", "text": ref}] if is_vl else ref
+            }
+        ]
+        
+        prompts.append(prompt)
+        completions.append(completion)
+
+    return {'prompt': prompt, 'completion': completions}
 
 def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
     return apply_chat_template(

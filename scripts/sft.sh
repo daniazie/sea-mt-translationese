@@ -1,24 +1,11 @@
-#!/usr/bin/bash
-
-#SBATCH -J space
-#SBATCH --gres=gpu:2
-#SBATCH --cpus-per-gpu=8
-#SBATCH --mem-per-gpu=64G
-#SBATCH -p batch_grad
-#SBATCH -w ariel-v10
-#SBATCH -t 1-0
-#SBATCH -o ./logs/slurm-%A.out
-#SBATCH -e ./logs/slurm-err-%A.out
-
 MODEL=$1
 DATASET=$2
-DATA_SIZE=$3
-IS_VL=$4
+IS_VL=$3
 
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python training/sft.py \
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file configs/accelerate_single_gpu_config.yaml src/train/sft.py \
 --model ${MODEL} ${IS_VL} \
---dataset ${DATASET} \
---data_size ${DATA_SIZE} \
+--dataset_name_or_path ${DATASET} \
 --bf16 \
 --per_device_train_batch_size=8 \
 --gradient_accumulation_steps=16 \
@@ -37,5 +24,6 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python training/sft.py \
 --lora_r=64 \
 --lora_alpha=256 \
 --lora_dropout=0.0 \
+--lora_target_modules q_proj k_proj v_proj o_proj \
 --lora_bias="none"
 exit
