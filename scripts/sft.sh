@@ -7,16 +7,16 @@ CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file co
 --model ${MODEL} ${IS_VL} \
 --dataset_name_or_path ${DATASET} \
 --bf16 \
---per_device_train_batch_size=8 \
+--per_device_train_batch_size=16 \
 --gradient_accumulation_steps=16 \
---per_device_eval_batch_size=8 \
+--per_device_eval_batch_size=16 \
 --eval_accumulation_step=16 \
 --eval_steps=5 \
 --warmup_ratio=0.1 \
 --evaluation_strategy='steps' \
 --num_train_epochs=5 \
 --weight_decay=0.1 \
---learning_rate=2e-5 \
+--learning_rate=2e-4 \
 --lr_scheduler='cosine' \
 --max_seq_length=2048 \
 --logging_steps=5 \
@@ -28,6 +28,6 @@ CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file co
 --lora_r=64 \
 --lora_alpha=256 \
 --lora_dropout=0.0 \
---lora_target_modules q_proj k_proj v_proj o_proj \
+--lora_target_modules all-linear \
 --lora_bias="none"
 exit

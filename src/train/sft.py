@@ -5,7 +5,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 from datasets import load_dataset, concatenate_datasets
 from tokenizers import AddedToken
 
-from utils import format_conversational, compute_metrics, preprocess_dataset, preprocess_logits_for_metrics
+from utils import get_lora_modules, format_prompt_completion, format_messages, compute_metrics, preprocess_dataset, preprocess_logits_for_metrics
 from evaluate import load
 
 from functools import partial
@@ -36,6 +36,7 @@ def init_parser():
     parser.add_argument('--per_device_train_batch_size', type=int, default=5)
     parser.add_argument('--per_device_eval_batch_size', type=int, default=5)
     parser.add_argument('--gradient_accumulation_steps', type=int, default=16)
+    parser.add_argument('--prompt_completion_format', action='store_true', default=False)
     parser.add_argument('--eval_accumulation_steps', type=int, default=16)
     parser.add_argument('--num_train_epochs', type=int, default=10)
     parser.add_argument('--weight_decay', type=float, default=0.1)
@@ -61,7 +62,7 @@ def init_parser():
     parser.add_argument('--lora_alpha', type=int, default=64)
     parser.add_argument('--lora_dropout', type=float, default=0.1)
     parser.add_argument('--lora_bias', type=str, default='none')
-    parser.add_argument('--lora_target_modules', nargs='*')
+    parser.add_argument('--lora_target_modules', type=get_lora_modules)
 
     parser.set_defaults(is_vl=False)
     parser.set_defaults(packing=False)
@@ -76,8 +77,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     dataset_name = args.dataset_name_or_path.split('/')[-1]
+    dataset_type = 'prompt-completion' if args.prompt_completion_format else 'messages'
 
-    experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}_{args.loss_type}_loss_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}"
+    experiment_name = f"SFT_{dataset_name}_lr_{args.learning_rate}_ep_{args.num_train_epochs}_wd_{args.weight_decay}_{args.loss_type}_loss_r_{args.lora_r}_alpha_{args.lora_alpha}_dropout_{args.lora_dropout}_{dataset_type}"
     
     run = wandb.init(
             project=f"SEAMT_{args.model.split('/')[-1]}",
@@ -88,11 +90,13 @@ if __name__ == "__main__":
                 'weight_decay': args.weight_decay,
                 'loss_type': args.loss_type,
                 'completion_only_loss': args.completion_only_loss,
+                'dataset_type': dataset_type,
                 'lora': {
                     'r': args.lora_r,
                     'alpha': args.lora_alpha,
                     'dropout': args.lora_dropout,
-                    'bias': args.lora_bias
+                    'bias': args.lora_bias,
+                    'target_modules': args.lora_target_modules
                 }
             },
             reinit="finish_previous"
@@ -140,11 +144,12 @@ if __name__ == "__main__":
     else:
         dataset = load_dataset(args.dataset_name_or_path)
         
-    formatting_func = partial(format_conversational, tokenizer=tokenizer, is_vl=args.is_vl)
+    formatting_func = partial(format_prompt_completion if args.prompt_completion_format else format_messages, tokenizer=tokenizer, is_vl=args.is_vl)
     dataset = dataset.map(formatting_func, batched=True)
     
-    #apply_chat_template = partial(preprocess_dataset, tokenizer=tokenizer)
-    #dataset = dataset.map(apply_chat_template)
+    # if not args.prompt_completion_format:
+    #     apply_chat_template = partial(preprocess_dataset, tokenizer=tokenizer)
+    #     dataset = dataset.map(apply_chat_template)
     train_set = dataset['train']
     valid_set = dataset['valid']
 
@@ -194,7 +199,8 @@ if __name__ == "__main__":
         loss_type=args.loss_type,
         seed=42,
         eval_on_start=True,
-        report_to=args.report_to
+        report_to=args.report_to,
+        hub_model_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA"
     )
 
     model = prepare_model_for_kbit_training(model)
@@ -209,6 +215,8 @@ if __name__ == "__main__":
     use_rslora=True,
     )
 
+    model = get_peft_model(model, peft_config)
+
     trainer = SFTTrainer(
         model=model,
         processing_class=tokenizer,
@@ -217,7 +225,6 @@ if __name__ == "__main__":
         args=training_args,
         data_collator=data_collator,
         callbacks=[early_stopping_callback] if args.early_stopping else None,
-        peft_config=peft_config,
         compute_metrics=compute_metrics,
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
     )
@@ -228,6 +235,7 @@ if __name__ == "__main__":
 
     trainer.save_model(output_dir)
 
+    trainer.push_to_hub()
     trainer.model.save_pretrained(f'{output_dir}/final_checkpoint')
     tokenizer.save_pretrained(f'{output_dir}/final_checkpoint')
 

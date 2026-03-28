@@ -11,6 +11,12 @@ def system_prompt_supported(tokenizer):
     except:
         return False
 
+def get_lora_modules(lora_modules: str) -> str | list[str]:
+    if not "," in lora_modules:
+        return lora_modules
+    else:
+        return [module for module in lora_modules.split(',')]
+
 def format_func(example):
     prompt = [
         {
@@ -26,7 +32,7 @@ def format_func(example):
 
     return {'prompt': prompt, 'completion': completion}
 
-def format_conversational(examples, tokenizer, is_vl):
+def format_prompt_completion(examples, tokenizer, is_vl):
     srcs = [example for example in examples['src']]
     refs = [example for example in examples['ref']]
     src_langs = [example for example in examples['src_lang']]
@@ -55,6 +61,7 @@ def format_conversational(examples, tokenizer, is_vl):
                     "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
                 }
             ]
+            prompts.append(prompt)
             
 
         completion = [
@@ -63,10 +70,49 @@ def format_conversational(examples, tokenizer, is_vl):
             }
         ]
         
-        prompts.append(prompt)
+        
         completions.append(completion)
 
     return {'prompt': prompts, 'completion': completions}
+
+def format_messages(examples, tokenizer, is_vl):
+    srcs = [example for example in examples['src']]
+    refs = [example for example in examples['ref']]
+    src_langs = [example for example in examples['src_lang']]
+    tgt_langs = [example for example in examples['tgt_lang']] 
+
+    messages = []
+    sys_prompt = "Translate the given sentence from {src_lang} to {tgt_lang}."
+    user_prompt = "{src_lang}: {src}\n\n{tgt_lang}: "
+    for src, ref, src_lang, tgt_lang in zip(srcs, refs, src_langs, tgt_langs):
+        if not system_prompt_supported(tokenizer):
+            user_prompt = sys_prompt + '\n\n' + user_prompt
+            message = [
+                {
+                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
+                },
+                {
+                "role": "assistant" if "assistant" in tokenizer.chat_template else 'model', "content": [{"type": "text", "text": ref}] if is_vl else ref
+            }
+            ]
+            messages.append(message)
+
+        else:
+            message = [
+                {
+                    "role": "system", "content": [{"type": "text", "text": sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)}] if is_vl else sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)
+                },
+                {
+                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
+                },
+                {
+                "role": "assistant" if "assistant" in tokenizer.chat_template else 'model', "content": [{"type": "text", "text": ref}] if is_vl else ref
+            }
+            ]
+            
+            messages.append(message)
+
+    return {'messages': messages}
 
 def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
     if example.get("prompt") and example.get("completion"):
@@ -76,7 +122,7 @@ def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
         }
     return {
         "text": tokenizer.apply_chat_template(
-            example,
+            example['messages'],
         )
     }
 
