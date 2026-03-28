@@ -30,8 +30,8 @@ def init_parser():
     parser.add_argument('--dataset_name_or_path', type=str, help='Dataset to be used')
     parser.add_argument('--prompt_type', type=str, help='Prompt language')
     parser.add_argument('--quant_type', type=str, help='Quantization method', default='bnb')
-    parser.add_argument('--full_finetuning', action='store_true')
-    parser.add_argument('--bidirectional', action='store_true')
+    parser.add_argument('--llm_int8_enable_fp32_cpu_offload', action='store_true', default=False)
+    parser.add_argument('--output_dir', type=str, default='models')
     parser.add_argument('--packing', action='store_true')
     parser.add_argument('--per_device_train_batch_size', type=int, default=5)
     parser.add_argument('--per_device_eval_batch_size', type=int, default=5)
@@ -57,6 +57,7 @@ def init_parser():
     parser.add_argument('--report_to', type=str, default='wandb')
     parser.add_argument('--loss_type', type=str, default='nll')
     parser.add_argument('--local_rank', type=int, default=32)
+    parser.add_argument('--activation_offloading', action='store_true', default=False)
 
     parser.add_argument('--lora_r', type=int, default=32)
     parser.add_argument('--lora_alpha', type=int, default=64)
@@ -68,8 +69,6 @@ def init_parser():
     parser.set_defaults(packing=False)
     parser.set_defaults(bf16=False)
     parser.set_defaults(fp16=False)
-    parser.set_defaults(full_finetuning=False)
-    parser.set_defaults(bidirectional=False)
     return parser
 
 if __name__ == "__main__":
@@ -105,8 +104,9 @@ if __name__ == "__main__":
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True
+        bnb_4bit_compute_dtype=torch.bfloat16 if args.bf16 else torch.float16,
+        bnb_4bit_use_double_quant=True,
+        llm_int8_enable_fp32_cpu_offload=args.llm_int8_enable_fp32_cpu_offload
     )
 
     if args.is_vl:
@@ -114,18 +114,16 @@ if __name__ == "__main__":
         model = AutoModelForImageTextToText.from_pretrained(
             args.model,
             quantization_config=quantization_config,
-            #attn_implementation='sdpa',
             device_map='auto',
-            dtype=torch.bfloat16,
+            dtype=torch.bfloat16 if args.bf16 else torch.float16,
         )
     else:
         from transformers import AutoModelForCausalLM
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
-            quantization_config=quantization_config if not args.full_finetuning else None,
-            #attn_implementation='eager' if 'gemma' in args.model.lower() else 'sdpa',
+            quantization_config=quantization_config,
             device_map='auto',
-            dtype=torch.bfloat16 if not args.full_finetuning else None,
+            dtype=torch.bfloat16 if args.bf16 else torch.float16,
         )
 
     tokenizer = AutoProcessor.from_pretrained(
@@ -153,8 +151,8 @@ if __name__ == "__main__":
     train_set = dataset['train']
     valid_set = dataset['valid']
 
-    os.makedirs('/data/dania/sea-mt/models', exist_ok=True)
-    output_dir = f'/data/dania/sea-mt/models/{args.model}_{experiment_name}'
+    os.makedirs(args.output_dir, exist_ok=True)
+    output_dir = f'{args.output_dir}/{args.model}_{experiment_name}'
 
     compute_metrics = partial(compute_metrics, tokenizer=tokenizer)
     early_stopping_callback = EarlyStoppingCallback(
@@ -192,15 +190,17 @@ if __name__ == "__main__":
         fp16=args.fp16,
         max_grad_norm=1.0,
         optim='adamw_8bit',
+        deepspeed=args.deepspeed,
         lr_scheduler_type=args.lr_scheduler,
         save_total_limit=args.save_total_limit,
         load_best_model_at_end=True,
+        use_liger_kernel=args.use_liger_kernel,
         metric_for_best_model='spBLEU',
         loss_type=args.loss_type,
         seed=42,
         eval_on_start=True,
         report_to=args.report_to,
-        hub_model_id=f"daniazie/{args.model.split('/')[-1]}-SFT-SEA"
+        activation_offloading=args.activation_offloading
     )
 
     model = prepare_model_for_kbit_training(model)

@@ -12,10 +12,10 @@ def system_prompt_supported(tokenizer):
         return False
 
 def get_lora_modules(lora_modules: str) -> str | list[str]:
-    if not "," in lora_modules:
+    if not " " in lora_modules.strip() and not "," in lora_modules:
         return lora_modules
     else:
-        return [module for module in lora_modules.split(',')]
+        return [module for module in lora_modules.split(',' if ',' in lora_modules else ' ')]
 
 def format_prompt_completion(examples, tokenizer, is_vl):
     srcs = [example for example in examples['src']]
