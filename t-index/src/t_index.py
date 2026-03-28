@@ -19,7 +19,12 @@ class TranslationeseIndex:
     Original TranslationeseIndex code can be found here: https://github.com/yikang0131/TranslationeseIndex
 
     Args:
-        {to do}
+        positive_model ([`str`] or [`PreTrainedModel`]):
+            Model fine-tuned on high-translationese samples.
+        negative_model  ([`str`] or [`PreTrainedModel`]):
+            Model fine-tuned on low-translationese samples.
+        tokenizer ([`str`] or [`PreTrainedTokenizerBase`] or [`None`]):
+            Processing class to be used to tokenize samples. Uses the model's tokenizer if None is passed.
     """
     def __init__(self, positive_model: str | PreTrainedModel, negative_model: str | PreTrainedModel, tokenizer: str | PreTrainedTokenizerBase | None = None):
         if tokenizer is None and isinstance(positive_model, str):

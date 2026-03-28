@@ -17,21 +17,6 @@ def get_lora_modules(lora_modules: str) -> str | list[str]:
     else:
         return [module for module in lora_modules.split(',')]
 
-def format_func(example):
-    prompt = [
-        {
-            "role": "user", "content": f"Translate the following sentence from {example['src_lang']} to {example['tgt_lang']}.\n\n{example['src_lang']}: {example['src']}\n\n{example['tgt_lang']}: "
-        }
-    ]
-
-    completion = [
-        {
-            "role": "assistant", "content": example['ref']
-        }
-    ]
-
-    return {'prompt': prompt, 'completion': completion}
-
 def format_prompt_completion(examples, tokenizer, is_vl):
     srcs = [example for example in examples['src']]
     refs = [example for example in examples['ref']]
@@ -40,28 +25,19 @@ def format_prompt_completion(examples, tokenizer, is_vl):
 
     prompts = []
     completions = []
-    sys_prompt = "Translate the given sentence from {src_lang} to {tgt_lang}."
+    instruction = "Translate the given sentence from {src_lang} to {tgt_lang}."
     user_prompt = "{src_lang}: {src}\n\n{tgt_lang}: "
     for src, ref, src_lang, tgt_lang in zip(srcs, refs, src_langs, tgt_langs):
-        if not system_prompt_supported(tokenizer):
-            user_prompt = sys_prompt + '\n\n' + user_prompt
-            prompt = [
-                {
-                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
-                }
-            ]
-            prompts.append(prompt)
-
-        else:
-            prompt = [
-                {
-                    "role": "system", "content": [{"type": "text", "text": sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)}] if is_vl else sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)
-                },
-                {
-                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
-                }
-            ]
-            prompts.append(prompt)
+        user_prompt = instruction + '\n\n' + user_prompt
+        prompt = [
+            {
+                "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
+            },
+            {
+                "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
+            }
+        ]
+        prompts.append(prompt)
             
 
         completion = [

@@ -235,7 +235,7 @@ if __name__ == "__main__":
 
     trainer.save_model(output_dir)
 
-    trainer.push_to_hub()
+    # trainer.push_to_hub()
     trainer.model.save_pretrained(f'{output_dir}/final_checkpoint')
     tokenizer.save_pretrained(f'{output_dir}/final_checkpoint')
 

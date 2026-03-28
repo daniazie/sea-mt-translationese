@@ -7,10 +7,10 @@ CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file co
 --model ${MODEL} ${IS_VL} \
 --dataset_name_or_path ${DATASET} \
 --bf16 \
---per_device_train_batch_size=16 \
+--per_device_train_batch_size=8 \
 --gradient_accumulation_steps=16 \
---per_device_eval_batch_size=16 \
---eval_accumulation_step=16 \
+--per_device_eval_batch_size=8 \
+--eval_accumulation_step=8 \
 --eval_steps=5 \
 --warmup_ratio=0.1 \
 --evaluation_strategy='steps' \
@@ -23,8 +23,8 @@ CUDA_VISIBLE_DEVICES=2 uv run accelerate launch --use_deepspeed --config_file co
 --save_steps=5 \
 --save_total_limit 2 \
 --report_to="wandb" \
---loss_type='nll' \
---completion_only_loss \
+--loss_type='dft' \
+--prompt_completion_format \
 --lora_r=64 \
 --lora_alpha=256 \
 --lora_dropout=0.0 \
