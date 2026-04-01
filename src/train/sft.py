@@ -1,4 +1,4 @@
-from transformers import AutoProcessor, BitsAndBytesConfig, EarlyStoppingCallback
+from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig, EarlyStoppingCallback
 from trl import SFTConfig, SFTTrainer, apply_chat_template
 from trl.trainer.sft_trainer import DataCollatorForLanguageModeling
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModelForCausalLM
@@ -110,7 +110,6 @@ if __name__ == "__main__":
     )
 
     if args.is_vl:
-        from transformers import AutoModelForImageTextToText
         model = AutoModelForImageTextToText.from_pretrained(
             args.model,
             quantization_config=quantization_config,
@@ -118,7 +117,6 @@ if __name__ == "__main__":
             dtype=torch.bfloat16 if args.bf16 else torch.float16 if args.fp16 else None,
         )
     else:
-        from transformers import AutoModelForCausalLM
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
             quantization_config=quantization_config,
@@ -216,6 +214,7 @@ if __name__ == "__main__":
     )
 
     model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
 
     trainer = SFTTrainer(
         model=model,
@@ -241,8 +240,8 @@ if __name__ == "__main__":
 
     try:
         model = model.merge_and_unload()
-    except:
-        pass
+    except Exception as e:
+        print(e)
 
 
     model.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)

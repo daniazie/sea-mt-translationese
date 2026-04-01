@@ -1,15 +1,3 @@
-#!/usr/bin/bash
-
-#SBATCH -J check
-#SBATCH --gres=gpu:2
-#SBATCH --cpus-per-gpu=8
-#SBATCH --mem-per-gpu=32G
-#SBATCH -p batch_grad
-#SBATCH -w ariel-v6
-#SBATCH -t 4-0
-#SBATCH -o ../logs/slurm-%A.out
-#SBATCH -e ../logs/slurm-err-%A.out
-
 model=$1
 model_dir="parallel_asian_treebank_qwen"
 tar -xvf data/t-index_data.tar.gz -C /local_datasets/

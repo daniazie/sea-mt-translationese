@@ -10,7 +10,7 @@ def format_data(item: dict):
     item.update(messages)
     return item
 
-data_dir = "data/synthetic/enms/parallel_asian_treebank_qwen/"
+data_dir = "/data/dania/sea-mt/data/t-index_data/synthetic/enms/parallel_asian_treebank_qwen/"
 data_files = os.listdir(data_dir)
 
 
