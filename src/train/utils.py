@@ -1,4 +1,5 @@
 from transformers import PreTrainedTokenizerBase
+
 from evaluate import load
 
 import numpy as np
@@ -12,11 +13,11 @@ def system_prompt_supported(tokenizer):
         return False
 
 def get_lora_modules(lora_modules: str) -> str | list[str]:
-    if not " " in lora_modules.strip() and not "," in lora_modules:
+    if not "," in lora_modules:
         return lora_modules
     else:
-        return [module for module in lora_modules.split(',' if ',' in lora_modules else ' ')]
-
+        return [module for module in lora_modules.split(',')]
+ 
 def format_prompt_completion(examples, tokenizer, is_vl):
     srcs = [example for example in examples['src']]
     refs = [example for example in examples['ref']]
@@ -101,6 +102,7 @@ def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
             example['messages'],
         )
     }
+
 
 def postprocess_text(preds, labels):
     preds = [pred.strip() for pred in preds]

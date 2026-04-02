@@ -1,14 +1,15 @@
+from transformers import BatchEncoding, PreTrainedTokenizerBase
 import torch
 from scipy.spatial.distance import mahalanobis
 from tv_score_utils import get_IDinfo, score_trajectory_volatility_fn
 
 
 @torch.no_grad()
-def featurize_fn(examples, model, tokenizer):
+def featurize_fn(examples, model, tokenizer: PreTrainedTokenizerBase):
     results = { "labels": [], "logits": [], "hidden_states": [] }
     for messages in examples["messages"]:
-        input_len = len(tokenizer.apply_chat_template(messages[:-1], add_generation_prompt=True))
-        input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt").to(model.device)
+        input_len = len(tokenizer.apply_chat_template(messages[:-1], add_generation_prompt=True, return_dict=False))
+        input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt", return_dict=False).to(model.device)
         outputs = model(input_ids, output_hidden_states=True)
         labels = input_ids[:,input_len:]
         output_feats = [hs[:,input_len:,:].mean(dim=1)[-1] for hs in outputs.hidden_states]

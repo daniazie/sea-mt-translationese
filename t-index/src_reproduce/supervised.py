@@ -298,7 +298,7 @@ def main(args):
         reward_model = get_llm_for_sequence_regression(
             args.model_path,
             "reward",
-            bf16=True,
+            #bf16=True,
             init_value_head=False,
         )
         return reward_model

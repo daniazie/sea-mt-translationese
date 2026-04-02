@@ -1,17 +1,14 @@
-from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, BitsAndBytesConfig, AutoTokenizer, set_seed
-from datasets import load_dataset, Dataset
+from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig, AutoTokenizer
+from datasets import load_dataset, Dataset, DatasetDict
 from tqdm import tqdm
 from dataclasses import dataclass, asdict
 from functools import partial
 
 import torch
-import random
 import argparse
 import json
 import os
 import gc
-
-
 
 @dataclass
 class PromptContent:
@@ -53,7 +50,6 @@ def init_parser():
     parser.add_argument('--top_k', type=int, default=20)
     parser.add_argument('--temperature', type=float, default=0.6)
     parser.add_argument('--num_beams', type=int, default=1)
-    parser.add_argument('--output_file', type=str)
 
     parser.set_defaults(is_vl=False)
     return parser
@@ -65,7 +61,7 @@ def format_dataset(examples, src_lang, tgt_lang):
         system_prompt = system_prompt['text']
     user_prompts = [f"""{lang_code_to_name[src_lang]}: {example}
 ### {lang_code_to_name[tgt_lang]}: 
-""".strip() for example in examples['src']
+""".strip() for example in examples['source']
 ]
     messages = []
     for prompt in user_prompts:
@@ -79,30 +75,14 @@ def format_dataset(examples, src_lang, tgt_lang):
         messages.append(message)
     return {"messages": messages}
 
-def get_dataset(src_lang, tgt_lang):
-    if "en" in src_lang:
-        src_path = f"/data/dania/sea-mt/data/NTREX/NTREX-128/newstest2019-src.eng.txt"
-    else:
-        src_path = f"/data/dania/sea-mt/data/NTREX/NTREX-128/newstest2019-ref.{lang_ntrex_aliases[src_lang]}"
-    tgt_path = f"/data/dania/sea-mt/data/NTREX/NTREX-128/newstest2019-ref.{lang_ntrex_aliases[tgt_lang]}.txt"
-
-    with open(src_path, "r") as file:
-        src_texts = file.readlines()
-    with open(tgt_path, "r") as file:
-        tgt_texts = file.readlines()
-
+def get_dataset():
     data = []
-    for src, tgt in zip(src_texts, tgt_texts):
-        data.append({
-            "src": src,
-            "ref": tgt
-        })
-    
+    with open("/data/dania/sea-mt/data/t-index_data/synthetic/enms/parallel_asian_treebank_qwen/test.jsonl", "r") as file:
+        for line in file.readlines():
+            data.append(json.loads(line))
     return Dataset.from_list(data)
 
 if __name__ == "__main__":
-    set_seed(42)
-    random.seed(42)
     parser = init_parser()
     args = parser.parse_args()
 
@@ -113,13 +93,13 @@ if __name__ == "__main__":
         bnb_4bit_use_double_quant=True,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16) if not args.is_vl else AutoModelForImageTextToText.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16, quantization_config=quantization_config)
-    tokenizer = AutoTokenizer.from_pretrained(args.model, add_eos_token=True, padding_side='left')
+    model = AutoModelForCausalLM.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16) if not args.is_vl else AutoModelForImageTextToText.from_pretrained(args.model, device_map='auto')
+    tokenizer = AutoProcessor.from_pretrained(args.model, add_eos_token=True, padding_side='left')
 
     torch.cuda.empty_cache()
     gc.collect()
 
-    dataset = get_dataset(args.src_lang, args.tgt_lang)
+    dataset = get_dataset()
     formatting_func = partial(format_dataset, src_lang=args.src_lang, tgt_lang=args.tgt_lang)
     dataset = dataset.map(formatting_func, batched=True)
 
@@ -140,20 +120,16 @@ if __name__ == "__main__":
         outputs = model.generate(**inputs, max_new_tokens=512, do_sample=True, top_p=args.top_p, top_k=args.top_k, temperature=args.temperature, num_beams=args.num_beams)
         input_length = [len(input_ids) for input_ids in inputs['input_ids']]
         mts = tokenizer.batch_decode([output[input_length[i]:] for i, output in enumerate(outputs)], skip_special_tokens=True)
-        for src, mt, ref in zip(batch['src'], mts, batch['ref']):
+        for src, mt, ref in zip(batch['source'], mts, batch['domestication']):
             preds.append({
-                "src": src,
-                "mt": mt,
-                "ref": ref
+                "source": src,
+                "foreignization": mt,
+                "domestication": ref
             })
 
-
-    os.makedirs('evaluation/results', exist_ok=True)
-    with open(f'evaluation/results/{args.output_file}.json', 'w') as file:
-        json.dump(preds, fp=file, indent=2)
-
-    t_index = random.sample(preds, k=300)
-    with open(f"/data/dania/sea-mt/data/gen_results/{args.output_file}.jsonl", "w") as file:
-        for item in preds:
-            json.dump(item, file)
+    output_dir = f'/data/dania/sea-mt/data/t-index_data/synthetic/enms/parallel_asian_treebank_{args.model.split('/')[-1].lower().split('-')[0]}'
+    os.makedirs(output_dir, exist_ok=True)
+    with open(f'{output_dir}/test.jsonl', 'w') as file:
+        for pred in preds:
+            json.dump(pred, file)
             file.write('\n')

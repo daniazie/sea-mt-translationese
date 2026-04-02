@@ -1,9 +1,8 @@
-from transformers import AutoProcessor, BitsAndBytesConfig, EarlyStoppingCallback
+from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig, EarlyStoppingCallback
 from trl import SFTConfig, SFTTrainer, apply_chat_template
 from trl.trainer.sft_trainer import DataCollatorForLanguageModeling
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModelForCausalLM
 from datasets import load_dataset, concatenate_datasets
-from tokenizers import AddedToken
 
 from utils import get_lora_modules, format_prompt_completion, format_messages, compute_metrics, preprocess_dataset, preprocess_logits_for_metrics
 from evaluate import load
@@ -29,7 +28,6 @@ def init_parser():
     parser.add_argument('--is_vl', action='store_true')
     parser.add_argument('--dataset_name_or_path', type=str, help='Dataset to be used')
     parser.add_argument('--prompt_type', type=str, help='Prompt language')
-    parser.add_argument('--quant_type', type=str, help='Quantization method', default='bnb')
     parser.add_argument('--llm_int8_enable_fp32_cpu_offload', action='store_true', default=False)
     parser.add_argument('--output_dir', type=str, default='models')
     parser.add_argument('--packing', action='store_true')
@@ -45,12 +43,14 @@ def init_parser():
     parser.add_argument('--lr_scheduler', type=str, default='inverse_sqrt')
     parser.add_argument('--max_seq_length', type=int, default=200)
     parser.add_argument('--evaluation_strategy', type=str, default=None)
+    parser.add_argument('--save_strategy', type=str, default='steps')
     parser.add_argument('--completion_only_loss', action='store_true', default=False)
     parser.add_argument('--early_stopping', action='store_true', default=False)
     parser.add_argument('--logging_steps', type=int, default=100)
     parser.add_argument('--eval_steps', type=int, default=0)
     parser.add_argument('--save_steps', type=int, default=0)
     parser.add_argument('--save_total_limit', type=int, default=-1)
+    parser.add_argument('--use_torch_compile', action='store_true', default=False)
     parser.add_argument('--use_liger_kernel', action='store_true', default=False)
     parser.add_argument('--bf16', action='store_true')
     parser.add_argument('--fp16', action='store_true')
@@ -103,33 +103,31 @@ if __name__ == "__main__":
 
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
+        bnb_4bit_quant_method="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16 if args.bf16 else torch.float16,
         bnb_4bit_use_double_quant=True,
         llm_int8_enable_fp32_cpu_offload=args.llm_int8_enable_fp32_cpu_offload
     )
 
     if args.is_vl:
-        from transformers import AutoModelForImageTextToText
         model = AutoModelForImageTextToText.from_pretrained(
             args.model,
             quantization_config=quantization_config,
             device_map='auto',
-            dtype=torch.bfloat16 if args.bf16 else torch.float16,
+            dtype=torch.bfloat16 if args.bf16 else torch.float16 if args.fp16 else None,
         )
     else:
-        from transformers import AutoModelForCausalLM
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
             quantization_config=quantization_config,
             device_map='auto',
-            dtype=torch.bfloat16 if args.bf16 else torch.float16,
+            dtype=None,
         )
 
     tokenizer = AutoProcessor.from_pretrained(
         args.model,
         add_eos_token=True,
-        padding_side='left'
+        padding_side='left',
     )
 
     if Path(args.dataset_name_or_path).exists():
@@ -138,7 +136,6 @@ if __name__ == "__main__":
             for split in ['train', 'valid', 'test']
         }
         dataset = load_dataset("json", data_files=data_files)
-
     else:
         dataset = load_dataset(args.dataset_name_or_path)
         
@@ -160,7 +157,8 @@ if __name__ == "__main__":
             early_stopping_threshold=0.001
         )
 
-    data_collator = DataCollatorForLanguageModeling(pad_token_id=tokenizer.pad_token_id, return_tensors='pt')
+    model = prepare_model_for_kbit_training(model)
+    data_collator = DataCollatorForLanguageModeling(pad_token_id=tokenizer.pad_token_type_id, return_tensors='pt')
 
     num_devices = torch.cuda.device_count()
     steps_per_epoch = math.ceil(train_set.num_rows / (args.per_device_train_batch_size * args.gradient_accumulation_steps * num_devices))
@@ -175,12 +173,12 @@ if __name__ == "__main__":
         eval_accumulation_steps=args.eval_accumulation_steps,
         num_train_epochs=args.num_train_epochs,
         eval_strategy=args.evaluation_strategy,
+        save_strategy=args.save_strategy,
         max_length=args.max_seq_length,
         weight_decay=args.weight_decay,
         learning_rate=args.learning_rate,
         logging_strategy='steps',
         logging_steps=args.logging_steps,
-        gradient_checkpointing=True,
         completion_only_loss=args.completion_only_loss,
         eval_steps=args.eval_steps,
         save_steps=args.save_steps,
@@ -190,20 +188,19 @@ if __name__ == "__main__":
         fp16=args.fp16,
         max_grad_norm=1.0,
         optim='adamw_8bit',
-        deepspeed=args.deepspeed,
         lr_scheduler_type=args.lr_scheduler,
         save_total_limit=args.save_total_limit,
         load_best_model_at_end=True,
+        torch_compile=args.use_torch_compile,
         use_liger_kernel=args.use_liger_kernel,
         metric_for_best_model='spBLEU',
         loss_type=args.loss_type,
         seed=42,
+        data_seed=42,
         eval_on_start=True,
         report_to=args.report_to,
         activation_offloading=args.activation_offloading
     )
-
-    model = prepare_model_for_kbit_training(model)
 
     peft_config = LoraConfig(
     r=args.lora_r, 
@@ -216,6 +213,7 @@ if __name__ == "__main__":
     )
 
     model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
 
     trainer = SFTTrainer(
         model=model,
@@ -239,7 +237,11 @@ if __name__ == "__main__":
     trainer.model.save_pretrained(f'{output_dir}/final_checkpoint')
     tokenizer.save_pretrained(f'{output_dir}/final_checkpoint')
 
-    model = model.merge_and_unload()
+    try:
+        model = model.merge_and_unload()
+    except Exception as e:
+        print(e)
+
 
     model.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
     tokenizer.save_pretrained(f'{output_dir}/merged_final', safe_serialization=True)
