@@ -21,3 +21,4 @@ t-index/models
 
 # common dirs
 wandb/
+models
