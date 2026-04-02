@@ -127,7 +127,7 @@ if __name__ == "__main__":
     tokenizer = AutoProcessor.from_pretrained(
         args.model,
         add_eos_token=True,
-        padding_side='left'
+        padding_side='left',
     )
 
     if Path(args.dataset_name_or_path).exists():
@@ -136,7 +136,6 @@ if __name__ == "__main__":
             for split in ['train', 'valid', 'test']
         }
         dataset = load_dataset("json", data_files=data_files)
-
     else:
         dataset = load_dataset(args.dataset_name_or_path)
         
@@ -159,7 +158,7 @@ if __name__ == "__main__":
         )
 
     model = prepare_model_for_kbit_training(model)
-    data_collator = DataCollatorForLanguageModeling(pad_token_id=tokenizer.pad_token_id, return_tensors='pt')
+    data_collator = DataCollatorForLanguageModeling(pad_token_id=tokenizer.pad_token_type_id, return_tensors='pt')
 
     num_devices = torch.cuda.device_count()
     steps_per_epoch = math.ceil(train_set.num_rows / (args.per_device_train_batch_size * args.gradient_accumulation_steps * num_devices))

@@ -1,4 +1,4 @@
-from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig, AutoTokenizer, set_seed
+from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, BitsAndBytesConfig, AutoTokenizer, set_seed
 from datasets import load_dataset, Dataset
 from tqdm import tqdm
 from dataclasses import dataclass, asdict
@@ -113,8 +113,8 @@ if __name__ == "__main__":
         bnb_4bit_use_double_quant=True,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16) if not args.is_vl else AutoModelForImageTextToText.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16)
-    tokenizer = AutoProcessor.from_pretrained(args.model, add_eos_token=True, padding_side='left')
+    model = AutoModelForCausalLM.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16) if not args.is_vl else AutoModelForImageTextToText.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16, quantization_config=quantization_config)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, add_eos_token=True, padding_side='left')
 
     torch.cuda.empty_cache()
     gc.collect()

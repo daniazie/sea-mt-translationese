@@ -5,16 +5,16 @@ build/
 dist/
 wheels/
 *.egg-info
+*/__pycache__
 
 # Virtual environments
 .venv
 
 
 # ariel
-_old/*
+_old/
 .vscode/
 logs/
-*/__pycache__
 submit_job.sh
 translationese_eval
 t-index/models
