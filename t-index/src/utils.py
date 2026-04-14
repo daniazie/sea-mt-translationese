@@ -95,11 +95,13 @@ def tokenize_fn(example, tokenizer: PreTrainedTokenizerBase, max_length, apply_c
     else:
         prompt_ids = _tokenize(
             example['prompt'],
+            tokenizer=tokenizer,
             return_tensors='pt'
         )['input_ids']
 
         prompt_completion_processed = _tokenize(
             example['prompt'] + example['completion'] + tokenizer.eos_token,
+            tokenizer=tokenizer,
             return_tensors='pt'
         )
         
@@ -148,7 +150,7 @@ def encode(batch, tokenizer: PreTrainedTokenizerBase, max_length, apply_chat_tem
         )['input_ids']
 
         prompt_completion_processed = _tokenize(
-            batch['prompt'] + batch['completion'] + tokenizer.eos_token,
+            batch['prompt'] + batch['completion'] + [tokenizer.eos_token] * len(batch['completion']),
             tokenizer=tokenizer,
             apply_chat_template=apply_chat_template,
             return_tensors='pt'
@@ -158,47 +160,42 @@ def encode(batch, tokenizer: PreTrainedTokenizerBase, max_length, apply_chat_tem
     if not prompt_completion_ids[:len(prompt_ids) - 1] == prompt_ids[:-1]:
         print(prompt_completion_ids[:len(prompt_ids)])
 
-    completion_mask = torch.tensor([0] * len(prompt_ids) + [1] * (len(prompt_completion_ids) - len(prompt_ids)))
+    completion_mask = [0] * len(prompt_ids) + [1] * (len(prompt_completion_ids) - len(prompt_ids))
 
     return {
         "input_ids": prompt_completion_ids,
-        "attention_mask": completion_mask
+        "completion_mask": completion_mask,
     }
 
 TIndexArgs = TranslationeseIndexArgs
 
 
-def format_messages_for_preference(examples, is_vl):
-    srcs = [example for example in examples['src']]
-    refs = [example for example in examples['ref']]
-    mts = [example for example in examples['mt']]
-    src_langs = [example for example in examples['src_lang']]
-    tgt_langs = [example for example in examples['tgt_lang']] 
+def format_messages_for_preference(examples, is_vl, src_lang, tgt_lang):
+    srcs = [example for example in examples['source']]
+    refs = [example for example in examples['domestication']]
+    mts = [example for example in examples['foreignization']]
 
     prompts = []
     completions_chosen = []
     completions_rejected = []
-    sys_prompt = "Translate the given sentence from {src_lang} to {tgt_lang}."
+    sys_prompt = "Translate the given sentence from {src_lang} to {tgt_lang}.\n\n"
     user_prompt = "{src_lang}: {src}\n\n{tgt_lang}: "
-    for src, ref, mt, src_lang, tgt_lang in zip(srcs, refs, mts, src_langs, tgt_langs):
+    for src, ref, mt in zip(srcs, refs, mts):
         prompt = [
             {
-                "role": "system", "content": [{"type": "text", "text": sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)}] if is_vl else sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)
-            },
-            {
-                "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
+                "role": "user", "content": [{"type": "text", "text": sys_prompt + user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else sys_prompt + user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
             }
         ]
 
         chosen = [
             {
-            "role": "assistant", "content": [{"type": "text", "text": ref}] if is_vl else ref
+            "role": "assistant", "content": [{"type": "text", "text": mt}] if is_vl else mt
             }
         ]
         
         rejected = [
             {
-            "role": "assistant", "content": [{"type": "text", "text": mt}] if is_vl else mt
+            "role": "assistant", "content": [{"type": "text", "text": ref}] if is_vl else ref
             }
         ]
         
@@ -206,7 +203,7 @@ def format_messages_for_preference(examples, is_vl):
         completions_chosen.append(chosen)
         completions_rejected.append(rejected)
 
-    return {"prompt": prompt, "chosen": completions_chosen, "rejected": completions_rejected}
+    return {"prompt": prompts, "chosen": completions_chosen, "rejected": completions_rejected}
 
 def format_messages(example):
     prompt = [{"role": "user", "content": example['prompt']}]

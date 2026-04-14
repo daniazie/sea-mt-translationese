@@ -326,6 +326,10 @@ def main(args):
         score_key = "dpo_aligned"
         model = load_dpo(args)
         score = dpo
+    elif args.model_type == "cpo":
+        score_key = "cpo_aligned"
+        model = load_dpo(args)
+        score = dpo
     elif args.model_type == "clf":
         score_key = "clf"
         model = load_clf(args)
@@ -356,6 +360,7 @@ def main(args):
         results[score_key].extend(scores)
     
     df = pd.DataFrame(results)
+    print(df.head())
 
     output_dir = os.path.dirname(args.output_file)
     output_dir = output_dir if output_dir else "."
@@ -381,7 +386,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_length", type=int, default=None)
     parser.add_argument("--model_args", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--model_type", type=str, choices=["rm", "dpo", "clf"])
+    parser.add_argument("--model_type", type=str, choices=["rm", "dpo", "clf", "cpo"])
     args = parser.parse_args()
 
     if args.config is not None:

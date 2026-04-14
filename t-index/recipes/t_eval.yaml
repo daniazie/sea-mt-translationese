@@ -1,9 +1,0 @@
-data_path: /local_datasets/t-index_data/synthetic/enms/*/test.jsonl
-prompt_key: source
-positive_key: foreignization
-negative_key: domestication
-prompt_template: "Translate the following text into Malay.\n\n{input}"
-batch_size: 8
-max_length: 1024
-device: cuda
-apply_chat_template: true

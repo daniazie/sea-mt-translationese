@@ -20,7 +20,8 @@ from score_functions import (
     get_mean_cov_inv,
     get_tv_score_ID_info,
     trajectory_volatility_fn,
-    mahalanobis_distance_fn
+    mahalanobis_distance_fn,
+    score_kl_divergence
 )
 
 def main(args):
@@ -137,6 +138,8 @@ def main(args):
             negtive_entropy_negative = -score_negative_entropy(**features_negative)
             fast_detectgpt_positive = score_fast_detectgpt(**features_positive)
             fast_detectgpt_negative = -score_fast_detectgpt(**features_negative)
+            kl_div_positive = score_kl_divergence(features_positive['logits'], features_negative['logits'])
+            kl_div_negative = score_kl_divergence(features_negative['logits'], features_positive['logits'])
             likelihood_ratios = log_lklh_positive + log_lklh_negative
 
             distance_to_positive_centroid_of_positive_model = mahalanobis_distance_fn(
@@ -181,6 +184,8 @@ def main(args):
             results["negative_entropy_negative"].extend(negtive_entropy_negative.tolist())
             results["fast_detectgpt_positive"].extend(fast_detectgpt_positive.tolist())
             results["fast_detectgpt_negative"].extend(fast_detectgpt_negative.tolist())
+            results['kl_divergence_positive'].extend(kl_div_positive.tolist())
+            results['kl_divergence_negative'].extend(kl_div_negative.tolist())
             results["likelihood_ratios"].extend(likelihood_ratios.tolist())
             results["mahalanobis_distance_positive"].extend(mahalanobis_distance_positive.tolist())
             results["mahalanobis_distance_negative"].extend(mahalanobis_distance_negative.tolist())

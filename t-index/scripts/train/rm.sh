@@ -28,6 +28,6 @@ deepspeed --module openrlhf.cli.train_rm \
    --lr_warmup_ratio 0.1 \
    --seed ${seed} \
    --adam_offload \
-   --full_determinism \
+   --learning_rate 4e-6 \
    --packing_samples 
 

@@ -6,11 +6,11 @@ max_samples=$5
 micro_train_batch_size=$6
 
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
-deepspeed --module openrlhf.cli.train_dpo \
+deepspeed --master_port=0 --module openrlhf.cli.train_dpo \
    --max_len 1024 \
    --dataset ${DATA_DIR}/sea-mt/data/t-index_data/synthetic/enms/${train_data_dir}/train.jsonl \
-   --chosen_key messages_foreignization \
-   --rejected_key messages_domestication \
+   --chosen_key messages_domestication \
+   --rejected_key messages_foreignization \
    --apply_chat_template \
    --train_batch_size 16 \
    --micro_train_batch_size ${micro_train_batch_size} \
@@ -31,5 +31,5 @@ deepspeed --module openrlhf.cli.train_dpo \
    --lr_warmup_ratio 0.1 \
    --seed ${seed} \
    --adam_offload \
-   --full_determinism \
+   --learning_rate 4e-6 \
    --packing_samples 

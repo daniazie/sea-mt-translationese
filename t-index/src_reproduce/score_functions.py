@@ -32,8 +32,8 @@ def score_negative_entropy(**kwargs):
     for logits in kwargs["logits"]:
         probs = logits.softmax(dim=-1)
         logprobs = torch.log(probs)
-        entropy = - (probs * logprobs).sum(dim=-1)
-        scores.append(-entropy.mean().item())
+        negentropy = (probs * logprobs).sum(dim=-1)
+        scores.append(negentropy.mean().item())
     return torch.tensor(scores)
 
 def score_fast_detectgpt(**kwargs):
@@ -88,3 +88,14 @@ def get_tv_score_ID_info(hs_all_sample_all_layer):
 
 def trajectory_volatility_fn(ID_info, **kwargs):
     return torch.tensor(score_trajectory_volatility_fn(ID_info, **kwargs))
+
+def score_kl_divergence(logits_P: torch.Tensor, logits_Q: torch.Tensor):
+    scores = []
+    for P, Q in zip(logits_P, logits_Q):
+        probs = P.softmax(dim=-1)
+        logprobs_p = P.log_softmax(dim=-1)
+        logprobs_q = Q.log_softmax(dim=-1)
+
+        kl_div = probs * (logprobs_p - logprobs_q)
+        scores.append(kl_div)
+    return torch.tensor(scores)

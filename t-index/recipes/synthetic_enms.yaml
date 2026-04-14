@@ -1,4 +1,4 @@
-data_path: /data/dania/sea-mt/data/gen_results/*.jsonl
+data_path: /data/dania/sea-mt/data/t-index_data/synthetic/enms/*/test.jsonl
 validation_path: /data/dania/sea-mt/data/t-index_data/synthetic/enms/parallel_asian_treebank_qwen/valid.jsonl
 prompt_field: source
 completion_positive_field: foreignization

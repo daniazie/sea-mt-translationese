@@ -8,6 +8,7 @@ from glob import glob
 import argparse
 import json
 import yaml
+import os
 
 from t_index import TranslationeseEval, TIndexArgs
 
@@ -37,20 +38,22 @@ if args.config is not None:
         if v is not None:
             setattr(config_args, k, v)
     args = vars(config_args)
-
+    
+print(args)
 model_dir_or_path = args.pop('model_dir_or_path')
 data_path = args.pop('data_path')
 result_file = args.pop('result_file')
 args.pop('config', None)
-
+is_reward_model = False
 if "rm" in model_dir_or_path:
     model = get_llm_for_sequence_regression(
         model_dir_or_path,
         model_type="reward",
-        normalize_reward=True
+        device_map='auto'
     )
+    is_reward_model = True
 else:
-    model = AutoModelForCausalLM.from_pretrained(model_dir_or_path, dtype=torch.bfloat16)
+    model = AutoModelForCausalLM.from_pretrained(model_dir_or_path, dtype=torch.bfloat16, device_map='auto')
 tokenizer = AutoTokenizer.from_pretrained(model_dir_or_path, padding_side='left')
 
 data = []
@@ -63,6 +66,8 @@ for data_file in glob(data_path):
 
 dataset = Dataset.from_list(data)
 
+
+
 tindex_args = TIndexArgs(
     **args
 )
@@ -70,11 +75,14 @@ tindex_args = TIndexArgs(
 teval = TranslationeseEval(
     model=model,
     tokenizer=tokenizer,
+    is_reward_model=is_reward_model,
     args=tindex_args
 )
 
 results = teval(dataset)
 
+results_dir = '/'.join(result_file.split('/')[:-1])
+os.makedirs(results_dir, exist_ok=True)
 with open(result_file, "w") as file:
     for result in results:
         json.dump(result, file)

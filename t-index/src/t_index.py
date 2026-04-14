@@ -34,7 +34,7 @@ class TranslationeseEval:
         tokenizer ([`str`] or [`PreTrainedTokenizerBase`] or [`None`]):
             Processing class to be used to tokenize samples. Uses the model's tokenizer if None is passed.
     """
-    def __init__(self, model: str| PreTrainedModel, tokenizer: str | PreTrainedTokenizerBase = None, data_collator=None, use_dpo=False, args: dict | TIndexArgs | None = None):
+    def __init__(self, model: str| PreTrainedModel, tokenizer: str | PreTrainedTokenizerBase = None, data_collator=None, is_reward_model=False, args: dict | TIndexArgs | None = None):
         if isinstance(model, str):
             self.model = AutoModelForCausalLM.from_pretrained(model, dtype=torch.bfloat16)
             if tokenizer is None:
@@ -51,69 +51,85 @@ class TranslationeseEval:
         if isinstance(args, dict):
             args = TIndexArgs(**args)
 
+        self.apply_chat_template = args.apply_chat_template
+
         self.args = asdict(args)
         self.batch_size = self.args.pop("batch_size")
-        self.use_dpo = use_dpo
+        self.is_reward_model = is_reward_model
 
         if data_collator is None:
             try: 
                 pad_token_id = tokenizer.pad_token_id
             except:
                 pad_token_id = tokenizer.pad_token_type_id
-            self.data_collator = DataCollatorForLanguageModeling(pad_token_id, max_length=args.max_length)
+            self.data_collator = DataCollatorForLanguageModeling(pad_token_id)
         else:
             self.data_collator = data_collator
 
     def compute_log_lklh(self, model: nn.Module, model_inputs: dict):
-        outputs = model(**model_inputs)
-        logits: torch.Tensor = outputs.logits[:, :-1]
-        input_ids: torch.Tensor = model_inputs["input_ids"][:, 1:]
-        response_mask: torch.Tensor = model_inputs['attention_mask'][:, 1:].bool()
+        if self.is_reward_model:
+            model_inputs['return_output'] = True
+            reward, outputs = model(**model_inputs)
+            return reward
+        else:
+            outputs = model(**model_inputs)
+            logits: torch.Tensor = outputs.logits[:, :-1]
+            input_ids: torch.Tensor = model_inputs["input_ids"][:, 1:]
+            response_mask: torch.Tensor = model_inputs['attention_mask'][:, 1:].bool()
+            
+            log_lklh = logits.log_softmax(dim=-1)
+            log_lklh = log_lklh.gather(-1, input_ids.unsqueeze(-1)).squeeze(-1)
+            log_lklh = log_lklh.masked_fill(~response_mask, 0)
         
-        log_lklh = logits.log_softmax(dim=-1)
-        log_lklh = log_lklh.gather(-1, input_ids.unsqueeze(-1)).squeeze(-1)
-        log_lklh = log_lklh.masked_fill(~response_mask, 0)
-        return log_lklh.sum(dim=1) / response_mask.sum(dim=1)
+            return log_lklh.sum(dim=1) / response_mask.sum(dim=1)
+
 
 
     def forward(self, dataset, model, tokenizer, data_collator=None):
         args = self.args
         dataset = preprocess_dataset(dataset, eos_token=tokenizer.eos_token, **args)
-        if args.get("apply_chat_template") == True:
+        if self.apply_chat_template:
             dataset = dataset.map(format_messages)
-        tokenize_func = partial(tokenize_fn, tokenizer=tokenizer, max_length=args['max_length'], apply_chat_template=args['apply_chat_template'])
-  
-        # dataloader = DataLoader(
-        #     dataset,
-        #     batch_size=self.batch_size,
-        #     shuffle=False,
-        #     collate_fn=self.data_collator,
-        # )
+        tokenize_func = partial(tokenize_fn, tokenizer=tokenizer, max_length=args['max_length'], apply_chat_template=self.apply_chat_template)
+        dataset = dataset.map(tokenize_func)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            collate_fn=data_collator,
+        )
         
         # dataset = dataset.batch(batch_size=self.batch_size)
-        dataset.set_transform(encode, output_all_columns=True)
+        # transform = partial(encode, tokenizer=tokenizer, max_length=args['max_length'], apply_chat_template=args['apply_chat_template'])
+        # dataset.set_transform(transform, output_all_columns=True)
+
+        
+        
+        # dataset.set_format('torch', columns=['input_ids', 'completion_mask'], output_all_columns=True)
+        # dataset = dataset.batch(batch_size=self.batch_size)
         results = []
         with torch.no_grad():
             rewards = []
-            for data in tqdm(dataset, desc="Evaluating...", total=len(dataset)):
-                print(data)
-                input_ids = torch.tensor(data['input_ids']).to(model.device)
+            for data in tqdm(dataloader, desc="Evaluating...", total=len(dataloader)):
+                input_ids = data['input_ids'].to(model.device)
                 mask_label = "attention_mask" if data_collator else "completion_mask"
-                completion_mask = torch.tensor(data[mask_label]).to(model.device)
+                completion_mask = data[mask_label].to(model.device)
 
                 model_inputs = {
                     "input_ids": input_ids,
                     "attention_mask": completion_mask,
-                    "return_output": True
                 }
 
                 reward = self.compute_log_lklh(model, model_inputs)
                 reward = reward.flatten().cpu().tolist()
-                rewards.append({
-                    "file_path": data['file_path'],
-                    "source": data['prompt'],
-                    "translation": data['completion'],
-                    "label": data['label'],
+                rewards += reward
+
+        for file_path, prompt, completion, label, reward in zip(dataset['file_path'], dataset['prompt'], dataset['completion'], dataset['label'], rewards):
+            results.append({
+                    "file_path": file_path,
+                    "source": prompt,
+                    "translation": completion,
+                    "label": label,
                     "log_lklh": reward
                 })
 
