@@ -15,6 +15,13 @@ class PromptContent:
     text: str
     type: str = "text"
 
+@dataclass
+class TranslateGemmaPromptContent:
+    text: str
+    source_lang_code: str
+    target_lang_code: str
+    type: str = "text"
+
 torch.cuda.empty_cache()
 gc.collect()
 
@@ -27,6 +34,11 @@ lang_code_to_name = {
     v: key.capitalize()
     for key, value in lang_name_to_code.items()
     for v in value
+}
+
+lang_code_for_translate_gemma = {
+    key: "en_US" if "eng" in v.lower() else "ms_MY"
+    for key, v in lang_code_to_name.items()
 }
 
 lang_ntrex_aliases = {
@@ -43,6 +55,8 @@ lang_ntrex_aliases = {
 def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str)
+    parser.add_argument('--dataset_dir', type=str)
+    parser.add_argument('--output_dir', type=str)
     parser.add_argument('--is_vl', action='store_true')
     parser.add_argument('--src_lang', type=str, default='en')
     parser.add_argument('--tgt_lang', type=str, default='ms')
@@ -56,57 +70,60 @@ def init_parser():
 
 def format_dataset(examples, src_lang, tgt_lang):
     system_prompt = f"""Translate the given text from {lang_code_to_name[src_lang]} to {lang_code_to_name[tgt_lang]}."""
-    system_prompt = asdict(PromptContent(text=system_prompt))
-    if not args.is_vl:
-        system_prompt = system_prompt['text']
+    
     user_prompts = [f"""{lang_code_to_name[src_lang]}: {example}
 ### {lang_code_to_name[tgt_lang]}: 
 """.strip() for example in examples['source']
 ]
+    if 'gemma' in args.model.lower():
+        user_prompts = [system_prompt + prompt for prompt in user_prompts]
+        
+    if args.is_vl:
+        system_prompt = asdict(PromptContent(text=system_prompt))
     messages = []
     for prompt in user_prompts:
         user_prompt = asdict(PromptContent(text=prompt))
         if not args.is_vl:
             user_prompt = user_prompt['text']
-        message = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
+        if not 'gemma' in args.model.lower():
+            message = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+        else:
+            message = [
+                {"role": "user", "content": user_prompt}
+            ]
         messages.append(message)
     return {"messages": messages}
 
-def get_dataset():
-    data = []
-    with open("/data/dania/sea-mt/data/t-index_data/synthetic/enms/parallel_asian_treebank_qwen/test.jsonl", "r") as file:
-        for line in file.readlines():
-            data.append(json.loads(line))
-    return Dataset.from_list(data)
+def format_dataset_for_translategemma(examples, src_lang, tgt_lang):
+    srcs = [example for example in examples['source']]
+    messages = []
+    for src in srcs:
+        content = TranslateGemmaPromptContent(text=src, source_lang_code=lang_code_for_translate_gemma[src_lang], target_lang_code=lang_code_for_translate_gemma[tgt_lang])
+        message = [
+            {"role": "user", "content": asdict(content)}
+        ]
 
-if __name__ == "__main__":
-    parser = init_parser()
-    args = parser.parse_args()
+def get_dataset() -> DatasetDict:
+    data_files = os.listdir(args.dataset_dir)
+    dataset = {}
+    for data_file in data_files:
+        with open(f"{args.dataset_dir}/{data_file}", 'r') as file:
+            data_split = data_file.split('/')[-1].split('.')[0]
+            data = []
+            for line in file.readlines():
+                data.append(json.loads(line))
+            dataset[data_split] = Dataset.from_list(data)
+    return DatasetDict(dataset)
 
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_method="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-    )
-
-    model = AutoModelForCausalLM.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16) if not args.is_vl else AutoModelForImageTextToText.from_pretrained(args.model, device_map='auto')
-    tokenizer = AutoProcessor.from_pretrained(args.model, add_eos_token=True, padding_side='left')
-
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    dataset = get_dataset()
-    formatting_func = partial(format_dataset, src_lang=args.src_lang, tgt_lang=args.tgt_lang)
-    dataset = dataset.map(formatting_func, batched=True)
-
+def generate_data(split: str, dataset: DatasetDict):
     preds = []
 
+    dataset: Dataset = dataset[split]
     dataset = dataset.batch(batch_size=16)
-    for batch in tqdm(dataset, desc="Generating..."):
+    for batch in tqdm(dataset, desc=f"Generating {split} data..."):
         inputs = tokenizer.apply_chat_template(
             batch['messages'],
             add_generation_prompt=True,
@@ -127,9 +144,33 @@ if __name__ == "__main__":
                 "domestication": ref
             })
 
-    output_dir = f'/data/dania/sea-mt/data/t-index_data/synthetic/enms/parallel_asian_treebank_{args.model.split('/')[-1].lower().split('-')[0]}'
-    os.makedirs(output_dir, exist_ok=True)
-    with open(f'{output_dir}/test.jsonl', 'w') as file:
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(f'{args.output_dir}/{split}_{args.num_beams}.jsonl', 'w') as file:
         for pred in preds:
             json.dump(pred, file)
             file.write('\n')
+
+if __name__ == "__main__":
+    parser = init_parser()
+    args = parser.parse_args()
+
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_method="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(args.model, device_map='auto', dtype=torch.bfloat16) if not args.is_vl else AutoModelForImageTextToText.from_pretrained(args.model, device_map='auto')
+    tokenizer = AutoProcessor.from_pretrained(args.model, add_eos_token=True, padding_side='left')
+
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    dataset = get_dataset()
+    formatting_func = partial(format_dataset if not 'translategemma' in args.model.lower() else format_dataset_for_translategemma, src_lang=args.src_lang, tgt_lang=args.tgt_lang)
+    dataset = dataset.map(formatting_func, batched=True)
+
+    generate = partial(generate_data, dataset=dataset)
+    for split in dataset:
+        generate(split)

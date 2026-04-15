@@ -130,6 +130,7 @@ if __name__ == "__main__":
         inputs = tokenizer.apply_chat_template(
             batch['messages'],
             add_generation_prompt=True,
+            enable_thinking=False,
             tokenize=True,
             truncation=True,
             padding=True,
