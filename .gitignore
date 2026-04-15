@@ -19,7 +19,6 @@ submit_job.sh
 translationese_eval
 t-index/models
 t-index/evaluation/
-t-index/
 
 # common dirs
 wandb/
