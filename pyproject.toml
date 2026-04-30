@@ -33,25 +33,25 @@ dependencies = [
 ]
 
 [[tool.uv.index]]
-url = "https://flashinfer.ai/whl/cu130"
+url = "https://flashinfer.ai/whl/cu128"
 
 [[tool.uv.index]]
-name = "pytorch-130"
-url = "https://download.pytorch.org/whl/cu130"
+name = "pytorch-128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-130"},
+  { index = "pytorch-128"},
 ]
 torchvision = [
-  { index = "pytorch-130"},
+  { index = "pytorch-128"},
 ]
 torchaudio = [
-  { index = "pytorch-130"},
+  { index = "pytorch-128"},
 ]
 torchao = [
-  { index = "pytorch-130"},
+  { index = "pytorch-128"},
 ]
 xielu = { git = "https://github.com/rubber-duck-debug/xielu.git" }
 
