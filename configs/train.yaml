@@ -1,0 +1,7 @@
+dataset_name_or_path: data/parallel_asian_treebank/mt/en_ms
+model: sail/Sailor2-8b-Chat
+early_stopping: false
+lora_r: 32
+lora_alpha: 128
+lora_dropout: 0.0
+training_args: configs/sft.yaml

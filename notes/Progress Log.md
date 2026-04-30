@@ -6,3 +6,4 @@
 
 ### 실험
 - [ ] Translationese detection as a [0,1] continuous metric vs. a mapping to binary values 실험
+- [ ] Fine-tune models: SFT, DPO, SFT + DPO

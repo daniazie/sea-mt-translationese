@@ -1,107 +1,58 @@
-from transformers import PreTrainedTokenizerBase
-
+from transformers import PreTrainedTokenizerBase, Trainer, TrainingArguments, PreTrainedModel, ProcessorMixin
+from transformers.data.data_collator import DataCollatorMixin
+from trl import SFTConfig, SFTTrainer, DPOTrainer, DPOConfig
+from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict
 from evaluate import load
 
+from typing import Callable
 import numpy as np
 import gc
 
-def system_prompt_supported(tokenizer):
-    try: 
-        _ = tokenizer.apply_chat_template([{"role": "system", "content": "Lorem ipsum"}])
-        return True
-    except:
-        return False
+def get_training_args_class(trainer: str) -> TrainingArguments:
+    if trainer.lower() == 'sft':
+        return SFTConfig
+    elif trainer.lower() == 'dpo':
+        return DPOConfig
+
+def load_trainer(
+    trainer: str, 
+    model: PreTrainedModel,
+    training_args: TrainingArguments,
+    train_dataset: Dataset | IterableDataset, 
+    eval_dataset: Dataset | IterableDataset | None = None,
+    processing_class: PreTrainedTokenizerBase | ProcessorMixin | None = None,
+    data_collator: DataCollatorMixin | None = None, 
+    compute_metrics: Callable | None = None,
+    **kwargs
+) -> Trainer:
+    if trainer.lower() == 'sft':
+        return SFTTrainer(
+            model,
+            args=training_args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=processing_class,
+            compute_metrics=compute_metrics,
+            **kwargs
+        )
+    elif trainer.lower() == "dpo":
+        return DPOTrainer(
+            model,
+            args=training_args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=processing_class,
+            compute_metrics=compute_metrics,
+            **kwargs
+        )
 
 def get_lora_modules(lora_modules: str) -> str | list[str]:
     if not "," in lora_modules:
         return lora_modules
     else:
         return [module for module in lora_modules.split(',')]
- 
-def format_prompt_completion(examples, tokenizer, is_vl):
-    srcs = [example for example in examples['src']]
-    refs = [example for example in examples['ref']]
-    src_langs = [example for example in examples['src_lang']]
-    tgt_langs = [example for example in examples['tgt_lang']] 
-
-    prompts = []
-    completions = []
-    instruction = "Translate the given sentence from {src_lang} to {tgt_lang}."
-    user_prompt = "{src_lang}: {src}\n\n{tgt_lang}: "
-    for src, ref, src_lang, tgt_lang in zip(srcs, refs, src_langs, tgt_langs):
-        user_prompt = instruction + '\n\n' + user_prompt
-        prompt = [
-            {
-                "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
-            },
-            {
-                "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
-            }
-        ]
-        prompts.append(prompt)
-            
-
-        completion = [
-            {
-                "role": "assistant" if "assistant" in tokenizer.chat_template else 'model', "content": [{"type": "text", "text": ref}] if is_vl else ref
-            }
-        ]
-        
-        
-        completions.append(completion)
-
-    return {'prompt': prompts, 'completion': completions}
-
-def format_messages(examples, tokenizer, is_vl):
-    srcs = [example for example in examples['src']]
-    refs = [example for example in examples['ref']]
-    src_langs = [example for example in examples['src_lang']]
-    tgt_langs = [example for example in examples['tgt_lang']] 
-
-    messages = []
-    sys_prompt = "Translate the given sentence from {src_lang} to {tgt_lang}."
-    user_prompt = "{src_lang}: {src}\n\n{tgt_lang}: "
-    for src, ref, src_lang, tgt_lang in zip(srcs, refs, src_langs, tgt_langs):
-        if not system_prompt_supported(tokenizer):
-            user_prompt = sys_prompt + '\n\n' + user_prompt
-            message = [
-                {
-                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
-                },
-                {
-                "role": "assistant" if "assistant" in tokenizer.chat_template else 'model', "content": [{"type": "text", "text": ref}] if is_vl else ref
-            }
-            ]
-            messages.append(message)
-
-        else:
-            message = [
-                {
-                    "role": "system", "content": [{"type": "text", "text": sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)}] if is_vl else sys_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang)
-                },
-                {
-                    "role": "user", "content": [{"type": "text", "text": user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)}] if is_vl else user_prompt.format(src_lang=src_lang, tgt_lang=tgt_lang, src=src)
-                },
-                {
-                "role": "assistant" if "assistant" in tokenizer.chat_template else 'model', "content": [{"type": "text", "text": ref}] if is_vl else ref
-            }
-            ]
-            
-            messages.append(message)
-
-    return {'messages': messages}
-
-def preprocess_dataset(example, tokenizer: PreTrainedTokenizerBase):
-    if example.get("prompt") and example.get("completion"):
-        return {
-            "prompt": tokenizer.apply_chat_template(example['prompt'], tokenize=False, add_generation_prompt=True),
-            "completion": tokenizer.apply_chat_template(example['completion'], tokenize=False)
-        }
-    return {
-        "text": tokenizer.apply_chat_template(
-            example['messages'],
-        )
-    }
 
 
 def postprocess_text(preds, labels):

@@ -23,3 +23,6 @@ t-index/evaluation/
 # common dirs
 wandb/
 models
+
+# others
+./tests/

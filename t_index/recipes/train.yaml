@@ -1,0 +1,5 @@
+dataset_name_or_path: data/translationese/synthetic/enms/parallel_asian_treebank_translategemma
+instruction_prompt: "Translate the following text to Malay.\n\n"
+model: Qwen/Qwen3-0.6B
+early_stopping: true
+training_args: t_index/recipes/training_args.yaml
